@@ -24,19 +24,21 @@ pub fn transaction_worker<T: Messenger>(
     bg_task_sender: UnboundedSender<TaskData>,
     ack_channel: UnboundedSender<(&'static str, String)>,
     consumption_type: ConsumptionType,
+    cl_audits: bool,
+    stream_key: &'static str,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let source = T::new(config).await;
         if let Ok(mut msg) = source {
-            let manager = Arc::new(ProgramTransformer::new(pool, bg_task_sender));
+            let manager = Arc::new(ProgramTransformer::new(pool, bg_task_sender, cl_audits));
             loop {
-                let e = msg.recv(TRANSACTION_STREAM, consumption_type.clone()).await;
+                let e = msg.recv(stream_key, consumption_type.clone()).await;
                 let mut tasks = JoinSet::new();
                 match e {
                     Ok(data) => {
                         let len = data.len();
                         for item in data {
-                            tasks.spawn(handle_transaction(Arc::clone(&manager), item));
+                            tasks.spawn(handle_transaction(Arc::clone(&manager), item, stream_key));
                         }
                         if len > 0 {
                             debug!("Processed {} txns", len);
@@ -45,18 +47,18 @@ pub fn transaction_worker<T: Messenger>(
                     Err(e) => {
                         error!("Error receiving from txn stream: {}", e);
                         metric! {
-                            statsd_count!("ingester.stream.receive_error", 1, "stream" => TRANSACTION_STREAM);
+                            statsd_count!("ingester.stream.receive_error", 1, "stream" => stream_key);
                         }
                     }
                 }
                 while let Some(res) = tasks.join_next().await {
                     if let Ok(id) = res {
                         if let Some(id) = id {
-                            let send = ack_channel.send((TRANSACTION_STREAM, id));
+                            let send = ack_channel.send((stream_key, id));
                             if let Err(err) = send {
                                 metric! {
                                     error!("Txn stream ack error: {}", err);
-                                    statsd_count!("ingester.stream.ack_error", 1, "stream" => TRANSACTION_STREAM);
+                                    statsd_count!("ingester.stream.ack_error", 1, "stream" => stream_key);
                                 }
                             }
                         }
@@ -67,11 +69,15 @@ pub fn transaction_worker<T: Messenger>(
     })
 }
 
-async fn handle_transaction(manager: Arc<ProgramTransformer>, item: RecvData) -> Option<String> {
+async fn handle_transaction(
+    manager: Arc<ProgramTransformer>,
+    item: RecvData,
+    stream_key: &'static str,
+) -> Option<String> {
     let mut ret_id = None;
     if item.tries > 0 {
         metric! {
-            statsd_count!("ingester.stream_redelivery", 1, "stream" => TRANSACTION_STREAM);
+            statsd_count!("ingester.stream_redelivery", 1, "stream" => stream_key);
         }
     }
     let id = item.id.to_string();
@@ -80,7 +86,7 @@ async fn handle_transaction(manager: Arc<ProgramTransformer>, item: RecvData) ->
         let signature = tx.signature().unwrap_or("NO SIG");
         debug!("Received transaction: {}", signature);
         metric! {
-            statsd_count!("ingester.seen", 1, "stream" => TRANSACTION_STREAM);
+            statsd_count!("ingester.seen", 1, "stream" => stream_key);
         }
         let seen_at = Utc::now();
         metric! {

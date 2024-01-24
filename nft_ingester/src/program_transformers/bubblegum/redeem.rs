@@ -14,13 +14,21 @@ pub async fn redeem<'c, T>(
     parsing_result: &BubblegumInstruction,
     bundle: &InstructionBundle<'c>,
     txn: &'c T,
+<<<<<<< HEAD
     instruction: &str,
+=======
+    cl_audits: bool,
+>>>>>>> db389d1bf94a4719b7686acf29ab733cf2286633
 ) -> Result<(), IngesterError>
 where
     T: ConnectionTrait + TransactionTrait,
 {
     if let Some(cl) = &parsing_result.tree_update {
+<<<<<<< HEAD
         let seq = save_changelog_event(cl, bundle.slot, bundle.txn_id, txn, instruction).await?;
+=======
+        let seq = save_changelog_event(cl, bundle.slot, bundle.txn_id, txn, cl_audits).await?;
+>>>>>>> db389d1bf94a4719b7686acf29ab733cf2286633
         let leaf_index = cl.index;
         let (asset_id, _) = Pubkey::find_program_address(
             &[

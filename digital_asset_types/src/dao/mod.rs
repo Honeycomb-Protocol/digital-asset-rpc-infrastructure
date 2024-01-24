@@ -1,3 +1,4 @@
+#![allow(ambiguous_glob_reexports)]
 mod full_asset;
 mod generated;
 pub mod scopes;

@@ -20,7 +20,9 @@ mod m20230510_183736_add_indices_to_assets;
 mod m20230516_185005_add_reindex_to_assets;
 mod m20230525_115717_cl_audit_table;
 mod m20230526_120101_add_owner_delegate_sequence_number;
+mod m20230526_120101_add_owner_delegate_sequence_number;
 mod m20230528_124011_cl_audit_table_index;
+mod m20230601_120101_add_pnft_enum_val;
 mod m20230601_120101_add_pnft_enum_val;
 mod m20230613_114817_add_name_symbol_to_asset_data;
 mod m20230615_120101_remove_asset_null_constraints;
@@ -31,6 +33,10 @@ mod m20230720_120101_add_asset_grouping_verified;
 mod m20230720_130101_remove_asset_grouping_null_constraints;
 mod m20230724_120101_add_group_info_seq;
 mod m20230726_013107_remove_not_null_constraint_from_group_value;
+mod m20230918_182123_add_raw_name_symbol;
+mod m20230919_072154_cl_audits;
+mod m20231118_174007_add_compressed_data;
+mod m20231122_191039_create_merkle_tree_table;
 
 pub struct Migrator;
 
@@ -69,6 +75,11 @@ impl MigratorTrait for Migrator {
             Box::new(m20230720_120101_add_asset_grouping_verified::Migration),
             Box::new(m20230720_130101_remove_asset_grouping_null_constraints::Migration),
             Box::new(m20230724_120101_add_group_info_seq::Migration),
+            Box::new(m20230726_013107_remove_not_null_constraint_from_group_value::Migration),
+            Box::new(m20230918_182123_add_raw_name_symbol::Migration),
+            Box::new(m20230919_072154_cl_audits::Migration),
+            Box::new(m20231118_174007_add_compressed_data::Migration),
+            Box::new(m20231122_191039_create_merkle_tree_table::Migration),
         ]
     }
 }

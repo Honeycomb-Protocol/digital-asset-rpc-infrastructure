@@ -1,4 +1,11 @@
-name: Build & Test
+name: Build das api components
+# This workflow uses github runners.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# This may be adjusted to whatever suits best your runners config.
+# Current config will build on manual trigger or pull-request (each push)
 on:
     pull_request:
         branches:

@@ -16,9 +16,9 @@ plerkle_messenger = { version = "1.5.0", features = ["redis"] }
 plerkle_serialization = "1.5.0"
 serde = "1.0.162"
 serde_json = "1.0.81"
-solana-client = "=1.14.15"
-solana-sdk = "=1.14.15"
-solana-transaction-status = "=1.14.15"
+solana-client = "~1.16.16"
+solana-sdk = "~1.16.16"
+solana-transaction-status = "~1.16.16"
 thiserror = "1.0.31"
 tokio = { version = "1.23.0", features = ["macros", "rt-multi-thread", "sync", "time", "fs"] }
 tokio-stream = { version = "0.1.14", features = ["io-util"] }

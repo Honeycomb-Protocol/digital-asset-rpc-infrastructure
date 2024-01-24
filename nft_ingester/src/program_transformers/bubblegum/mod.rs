@@ -27,6 +27,7 @@ pub async fn handle_bubblegum_instruction<'c, T>(
     bundle: &'c InstructionBundle<'c>,
     txn: &T,
     task_manager: &UnboundedSender<TaskData>,
+    cl_audits: bool,
 ) -> Result<(), IngesterError>
 where
     T: ConnectionTrait + TransactionTrait,

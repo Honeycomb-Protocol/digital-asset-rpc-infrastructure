@@ -312,6 +312,9 @@ pub fn v1_content_from_json(
                         uri
                     ));
                 }
+            } else if v.is_string() {
+                let str_uri = v.as_str().unwrap().to_string();
+                actual_files.insert(str_uri.clone(), file_from_str(str_uri));
             }
             _ => {}
         })

@@ -1,0 +1,23 @@
+[workspace]
+members = [
+  "das_api",
+  "digital_asset_types",
+  "metaplex-rpc-proxy",
+  "nft_ingester",
+  "tools/acc_forwarder",
+  "tools/bgtask_creator",
+  "tools/fetch_trees",
+  "tools/load_generation",
+  "tools/tree-status",
+  "tools/txn_forwarder",
+]
+exclude = [
+  # "das_api",
+  "migration",
+  "metaplex_program_library",
+  "solana_program_library",
+]
+
+[profile.release]
+lto = true
+codegen-units = 1

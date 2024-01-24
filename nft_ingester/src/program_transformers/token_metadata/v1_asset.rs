@@ -22,7 +22,7 @@ use num_traits::FromPrimitive;
 use plerkle_serialization::Pubkey as FBPubkey;
 use sea_orm::{
     entity::*, query::*, sea_query::OnConflict, ActiveValue::Set, ConnectionTrait, DbBackend,
-    DbErr, EntityTrait, JsonValue,
+    DbErr, EntityTrait, FromQueryResult, JoinType, JsonValue,
 };
 
 use crate::tasks::{DownloadMetadata, IntoTaskData};

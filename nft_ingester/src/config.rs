@@ -1,6 +1,8 @@
-use std::fmt::{Display, Formatter};
-
-use figment::{providers::Env, value::Value, Figment};
+use figment::{
+    providers::{Env, Format, Yaml},
+    value::Value,
+    Figment,
+};
 use plerkle_messenger::MessengerConfig;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::Deserialize;
@@ -22,7 +24,9 @@ pub struct IngesterConfig {
     pub role: Option<IngesterRole>,
     pub max_postgres_connections: Option<u32>,
     pub account_stream_worker_count: Option<u32>,
+    pub account_backfill_stream_worker_count: Option<u32>,
     pub transaction_stream_worker_count: Option<u32>,
+    pub transaction_backfill_stream_worker_count: Option<u32>,
     pub code_version: Option<&'static str>,
     pub ipfs_gateway: Option<String>,
     pub bg_task_config: Option<BgTaskConfig>,
@@ -30,13 +34,8 @@ pub struct IngesterConfig {
 
 impl IngesterConfig {
     /// Get the db url out of the dict, this is built a a dict so that future extra db parameters can be easily shoved in.
-    /// this panics if the key is not present
     pub fn get_database_url(&self) -> String {
         self.database_config
-            .get(DATABASE_URL_KEY)
-            .and_then(|u| u.clone().into_string())
-            .ok_or(IngesterError::ConfigurationError {
-                msg: format!("Database connection string missing: {}", DATABASE_URL_KEY),
             })
             .unwrap()
     }
@@ -62,8 +61,16 @@ impl IngesterConfig {
         self.account_stream_worker_count.unwrap_or(2)
     }
 
+    pub fn get_account_backfill_stream_worker_count(&self) -> u32 {
+        self.account_backfill_stream_worker_count.unwrap_or(0)
+    }
+
     pub fn get_transaction_stream_worker_count(&self) -> u32 {
         self.transaction_stream_worker_count.unwrap_or(2)
+    }
+
+    pub fn get_transaction_backfill_stream_worker_count(&self) -> u32 {
+        self.transaction_backfill_stream_worker_count.unwrap_or(0)
     }
 }
 
@@ -87,6 +94,12 @@ pub enum IngesterRole {
     Ingester,
 }
 
+impl Default for IngesterRole {
+    fn default() -> Self {
+        IngesterRole::All
+    }
+}
+
 impl Display for IngesterRole {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -106,9 +119,14 @@ pub fn rand_string() -> String {
         .collect()
 }
 
-pub fn setup_config() -> IngesterConfig {
-    let mut config: IngesterConfig = Figment::new()
-        .join(Env::prefixed("INGESTER_"))
+pub fn setup_config(config_file: Option<&PathBuf>) -> IngesterConfig {
+    let mut figment = Figment::new().join(Env::prefixed("INGESTER_"));
+
+    if let Some(config_file) = config_file {
+        figment = figment.join(Yaml::file(config_file));
+    }
+
+    let mut config: IngesterConfig = figment
         .extract()
         .map_err(|config_error| IngesterError::ConfigurationError {
             msg: format!("{}", config_error),

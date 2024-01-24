@@ -9,14 +9,15 @@ use digital_asset_types::{
     dapi::{
         get_asset, get_asset_batch, get_asset_proof, get_asset_proof_batch,
         get_assets_by_authority, get_assets_by_creator, get_assets_by_group, get_assets_by_owner,
-        get_signatures_for_asset, search_assets,
+        get_compressed_data, get_proof, get_proof_for_asset, get_signatures_for_asset,
+        search_assets,
     },
     feature_flag::FeatureFlags,
     rpc::{
         filter::{AssetSortBy, SearchConditionType},
         response::GetGroupingResponse,
+        OwnershipModel, RoyaltyModel,
     },
-    rpc::{OwnershipModel, RoyaltyModel},
 };
 use open_rpc_derive::document_rpc;
 use sea_orm::{sea_query::ConditionType, ConnectionTrait, DbBackend, Statement};
@@ -33,7 +34,7 @@ use {
     crate::DasApiError,
     async_trait::async_trait,
     digital_asset_types::rpc::{
-        response::AssetList, response::TransactionSignatureList, Asset, AssetProof,
+        response::AssetList, response::TransactionSignatureList, Asset, AssetProof, CompressedData,
     },
     sea_orm::{DatabaseConnection, DbErr, SqlxPostgresConnector},
     sqlx::postgres::PgPoolOptions,
@@ -199,7 +200,7 @@ impl DasApi {
 }
 
 pub fn not_found(asset_id: &String) -> DbErr {
-    DbErr::RecordNotFound(format!("Asset Proof for {} Not Found", asset_id))
+    DbErr::RecordNotFound(format!("Proof for {} Not Found", asset_id))
 }
 
 #[document_rpc]
@@ -255,6 +256,34 @@ impl ApiContract for DasApi {
             .map(|id| (id.clone(), proofs.get(id).cloned()))
             .collect();
         Ok(result)
+    }
+
+    async fn get_compressed_data(
+        &self,
+        payload: LeafTreePayload,
+    ) -> Result<CompressedData, DasApiError> {
+        let tree = validate_pubkey(payload.tree.clone())?;
+        let tree_bytes = tree.to_bytes().to_vec();
+        get_compressed_data(&self.db_connection, tree_bytes, payload.leaf_idx)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn get_proof(self: &DasApi, payload: LeafTreePayload) -> Result<AssetProof, DasApiError> {
+        let tree = validate_pubkey(payload.tree.clone())?;
+        let tree_bytes = tree.to_bytes().to_vec();
+        get_proof(&self.db_connection, tree_bytes, payload.leaf_idx)
+            .await
+            .and_then(|p| {
+                if p.proof.is_empty() {
+                    return Err(not_found(&format!(
+                        "Tree {} Leaf {}",
+                        payload.tree, payload.leaf_idx
+                    )));
+                }
+                Ok(p)
+            })
+            .map_err(Into::into)
     }
 
     async fn get_asset(self: &DasApi, payload: GetAsset) -> Result<Asset, DasApiError> {
@@ -404,10 +433,7 @@ impl ApiContract for DasApi {
             sort_by,
             &page_options,
             &self.feature_flags,
-            &options,
         )
-        .await
-        .map_err(Into::into)
     }
 
     async fn get_assets_by_authority(

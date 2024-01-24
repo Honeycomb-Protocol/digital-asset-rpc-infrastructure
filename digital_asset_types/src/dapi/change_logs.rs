@@ -1,3 +1,4 @@
+use log::debug;
 use sea_orm::sea_query::Expr;
 use sea_orm::{DatabaseConnection, DbBackend};
 use std::collections::HashMap;
@@ -34,7 +35,7 @@ struct Leaf {
 }
 pub async fn get_asset_proof(
     db: &DatabaseConnection,
-    asset_id: Vec<u8>,
+    leaf: cl_items::Model,
 ) -> Result<AssetProof, DbErr> {
     let sel = cl_items::Entity::find()
         .join_rev(
@@ -228,6 +229,55 @@ fn build_asset_proof(
         node_index: leaf_node_idx,
         tree_id: bs58::encode(tree_id).into_string(),
     }
+}
+pub async fn get_proof_for_asset(
+    db: &DatabaseConnection,
+    asset_id: Vec<u8>,
+) -> Result<AssetProof, DbErr> {
+    let sel = cl_items::Entity::find()
+        .join_rev(
+            JoinType::InnerJoin,
+            asset::Entity::belongs_to(cl_items::Entity)
+                .from(asset::Column::Nonce)
+                .to(cl_items::Column::LeafIdx)
+                .into(),
+        )
+        .order_by_desc(cl_items::Column::Seq)
+        .filter(Expr::cust("asset.tree_id = cl_items.tree"))
+        .filter(Expr::cust_with_values(
+            "asset.id = $1::bytea",
+            vec![asset_id],
+        ))
+        .filter(cl_items::Column::Level.eq(0i64));
+    let leaf: Option<cl_items::Model> = sel.one(db).await?;
+    if leaf.is_none() {
+        return Err(DbErr::RecordNotFound("Asset Proof Not Found".to_string()));
+    }
+    let leaf = leaf.unwrap();
+    get_proof_for_leaf(db, leaf).await
+}
+
+pub async fn get_proof(
+    db: &DatabaseConnection,
+    tree: Vec<u8>,
+    leaf_idx: u32,
+) -> Result<AssetProof, DbErr> {
+    let sel = cl_items::Entity::find()
+        .filter(Expr::cust_with_values(
+            "cl_items.tree = $1::bytea",
+            vec![tree],
+        ))
+        .filter(Expr::cust_with_values(
+            "cl_items.leaf_idx = $1::bigint",
+            vec![leaf_idx],
+        ))
+        .filter(cl_items::Column::Level.eq(0i64));
+    let leaf: Option<cl_items::Model> = sel.one(db).await?;
+    if leaf.is_none() {
+        return Err(DbErr::RecordNotFound("Asset Proof Not Found".to_string()));
+    }
+    let leaf = leaf.unwrap();
+    get_proof_for_leaf(db, leaf).await
 }
 
 fn make_empty_node(lvl: i64, node_index: i64, tree: Vec<u8>) -> SimpleChangeLog {
