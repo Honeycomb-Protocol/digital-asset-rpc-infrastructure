@@ -26,6 +26,7 @@ pub enum Interface {
     V1NFT,
     #[serde(rename = "V1_PRINT")]
     V1PRINT,
+    #[allow(non_camel_case_types)]
     #[serde(rename = "LEGACY_NFT")]
     // TODO: change on version bump
     #[allow(non_camel_case_types)]
@@ -107,6 +108,8 @@ pub type Contexts = Vec<Context>;
 pub struct File {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cdn_uri: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mime: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -204,6 +207,15 @@ pub struct Group {
     pub group_value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verified: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collection_metadata: Option<CollectionMetadata>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct CollectionMetadata {
+    pub name: Option<String>,
+    pub symbol: Option<String>,
+    pub image: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]

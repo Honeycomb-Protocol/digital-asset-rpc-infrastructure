@@ -69,7 +69,7 @@ pub async fn get_proof_for_leaf(
     Ok(asset_proof)
 }
 
-pub async fn get_asset_proofs(
+pub async fn get_asset_proof_batch(
     db: &DatabaseConnection,
     asset_ids: Vec<Vec<u8>>,
 ) -> Result<HashMap<String, AssetProof>, DbErr> {
@@ -82,6 +82,7 @@ pub async fn get_asset_proofs(
                 .to(cl_items::Column::LeafIdx)
                 .into(),
         )
+        // get only the necessary columns
         .select_only()
         .column(asset::Column::Id)
         .column(asset::Column::TreeId)
@@ -160,12 +161,12 @@ pub async fn get_asset_proofs(
             })
             .collect();
 
-        let leaf_info = asset_map.get(leaf).unwrap();
+        let leaf_info = asset_map.get(&leaf).unwrap();
         let asset_proof = build_asset_proof(
             leaf_info.tree_id.clone(),
             leaf_info.node_idx,
             leaf_info.hash.clone(),
-            req_indexes,
+            &req_indexes,
             &required_nodes,
         );
 
@@ -181,7 +182,7 @@ fn build_asset_proof(
     leaf_node_idx: i64,
     leaf_hash: Vec<u8>,
     req_indexes: &Vec<i64>,
-    required_nodes: &[SimpleChangeLog],
+    required_nodes: &Vec<SimpleChangeLog>,
 ) -> AssetProof {
     let mut final_node_list = vec![SimpleChangeLog::default(); req_indexes.len()];
     for node in required_nodes.iter() {

@@ -58,11 +58,20 @@ impl DownloadMetadataTask {
     async fn request_metadata(
         uri: String,
         timeout: Duration,
+        ipfs_gateway: Option<String>,
     ) -> Result<serde_json::Value, IngesterError> {
+        let new_uri = if uri.starts_with("https://nftstorage.link") {
+            if let Some(gateway) = ipfs_gateway {
+                uri.replace("https://nftstorage.link", &gateway)
+            } else {
+                uri
+            }
+        } else {
+            uri
+        };
+
         let client = ClientBuilder::new().timeout(timeout).build()?;
-        let response = Client::get(&client, uri) // Need to check for malicious sites ?
-            .send()
-            .await?;
+        let response = Client::get(&client, new_uri).send().await?;
 
         if response.status() != reqwest::StatusCode::OK {
             Err(IngesterError::HttpError {
@@ -98,6 +107,7 @@ impl BgTask for DownloadMetadataTask {
         &self,
         db: &DatabaseConnection,
         data: serde_json::Value,
+        ipfs_gateway: Option<String>,
     ) -> Result<(), IngesterError> {
         let download_metadata: DownloadMetadata = serde_json::from_value(data)?;
         let meta_url = Url::parse(&download_metadata.uri);
@@ -106,6 +116,7 @@ impl BgTask for DownloadMetadataTask {
                 DownloadMetadataTask::request_metadata(
                     download_metadata.uri.clone(),
                     self.timeout.unwrap_or(Duration::from_secs(3)),
+                    ipfs_gateway,
                 )
                 .await?
             }

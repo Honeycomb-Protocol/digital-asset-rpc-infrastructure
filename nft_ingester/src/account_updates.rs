@@ -6,7 +6,7 @@ use crate::{
 use cadence_macros::{is_global_default_set, statsd_count, statsd_time};
 use chrono::Utc;
 use log::{debug, error};
-use plerkle_messenger::{ConsumptionType, Messenger, MessengerConfig, RecvData};
+use plerkle_messenger::{ConsumptionType, Messenger, MessengerConfig, RecvData, ACCOUNT_STREAM};
 use plerkle_serialization::root_as_account_info;
 use sqlx::{Pool, Postgres};
 use tokio::{
@@ -98,7 +98,7 @@ async fn handle_account(
         let res = manager.handle_account_update(account_update).await;
         let should_ack = capture_result(
             id.clone(),
-            stream_key,
+            ACCOUNT_STREAM,
             ("owner", &str_program_id),
             item.tries,
             res,

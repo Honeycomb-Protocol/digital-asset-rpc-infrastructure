@@ -1,19 +1,29 @@
+use crossbeam::channel::{unbounded, Sender};
+use digital_asset_types::dao::cl_audits;
+use log::{trace, warn};
+use plerkle_messenger::{MessengerConfig, TRANSACTION_STREAM};
+use plerkle_serialization::serializer::seralize_encoded_transaction_with_status;
+use sea_orm::{QueryOrder, Value};
+use solana_client::rpc_client::GetConfirmedSignaturesForAddress2Config;
+use tokio::runtime::Builder;
+
 use {
     anchor_client::anchor_lang::AnchorDeserialize,
     anyhow::Context,
     clap::{arg, Parser, Subcommand},
-    digital_asset_types::dao::cl_items,
+    figment::util::map,
     futures::{
         future::{try_join, try_join_all, BoxFuture, FutureExt, TryFutureExt},
         stream::{self, StreamExt},
     },
     log::{debug, error, info},
-    prometheus::{IntGauge, IntGaugeVec, Opts, Registry},
     sea_orm::{
-        sea_query::{Expr, Value},
-        ColumnTrait, ConnectionTrait, DatabaseConnection, DbBackend, DbErr, EntityTrait,
-        FromQueryResult, QueryFilter, QuerySelect, QueryTrait, SqlxPostgresConnector, Statement,
+        sea_query::Expr, ColumnTrait, ConnectionTrait, DatabaseConnection, DbBackend, DbErr,
+        EntityTrait, FromQueryResult, QueryFilter, QuerySelect, QueryTrait, SqlxPostgresConnector,
+        Statement,
     },
+    // plerkle_serialization::serializer::seralize_encoded_transaction_with_status,
+    // solana_client::rpc_client::GetConfirmedSignaturesForAddress2Config,
     solana_client::{
         nonblocking::rpc_client::RpcClient, rpc_config::RpcTransactionConfig,
         rpc_request::RpcRequest,
@@ -28,6 +38,8 @@ use {
         option_serializer::OptionSerializer, EncodedConfirmedTransactionWithStatusMeta,
         UiTransactionEncoding, UiTransactionStatusMeta,
     },
+    // solana_sdk::signature::Signature,
+    // solana_transaction_status::UiTransactionEncoding,
     spl_account_compression::{
         state::{
             merkle_tree_get_size, ConcurrentMerkleTreeHeader, CONCURRENT_MERKLE_TREE_HEADER_SIZE_V1,
@@ -39,6 +51,7 @@ use {
         cmp,
         collections::HashMap,
         env,
+        num::NonZeroUsize,
         pin::Pin,
         str::FromStr,
         sync::{
@@ -49,37 +62,19 @@ use {
     tokio::{
         fs::OpenOptions,
         io::{stdout, AsyncWrite, AsyncWriteExt},
-        sync::{mpsc, Mutex, Semaphore},
-        task::JoinSet,
-        time::Duration,
+        sync::{mpsc, Mutex},
     },
-    txn_forwarder::{find_signatures, read_lines, rpc_send_with_retries, save_metrics},
+    txn_forwarder::{find_signatures, read_lines, rpc_tx_with_retries},
 };
 
-lazy_static::lazy_static! {
-    pub static ref TREE_STATUS_MAX_SEQ: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("tree_status_max_seq", "Maximum sequence of the tree"),
-        &["tree"]
-    ).unwrap();
-
-    pub static ref TREE_STATUS_MISSING_SEQ: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("tree_status_missing_seq", "Number of missing sequences of the tree"),
-        &["tree"]
-    ).unwrap();
-
-    pub static ref TREE_STATUS_LEAVES_COMPLETED: IntGauge = IntGauge::new(
-        "tree_status_leaves_completed", "Number of complete trees"
-    ).unwrap();
-
-    pub static ref TREE_STATUS_LEAVES_INCOMPLETE: IntGauge = IntGauge::new(
-        "tree_status_leaves_incomplete", "Number of incomplete trees"
-    ).unwrap();
-
-    pub static ref TREE_STATUS_MISSED_LEAVES: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("tree_status_missed_leaves", "Number of missed leaves"),
-        &["tree"]
-    ).unwrap();
-}
+const RPC_GET_TXN_RETRIES: u8 = 5;
+const RPC_TXN_CONFIG: RpcTransactionConfig = RpcTransactionConfig {
+    encoding: Some(UiTransactionEncoding::Base64),
+    commitment: Some(CommitmentConfig {
+        commitment: CommitmentLevel::Finalized,
+    }),
+    max_supported_transaction_version: Some(0),
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ParseError {
@@ -127,32 +122,12 @@ struct Args {
     rpc: String,
 
     /// Number of concurrent requests for fetching transactions.
-    #[arg(long, default_value_t = 25)]
-    concurrency_tx: usize,
-
-    /// Number of concurrent processed trees.
-    #[arg(long, default_value_t = 5)]
-    concurrency_tree: usize,
-
-    /// Size of signatures queue
-    #[arg(long, default_value_t = 25_000)]
-    signatures_history_queue: usize,
+    #[arg(long, short, default_value_t = 25)]
+    concurrency: usize,
 
     /// Maximum number of retries for transaction fetching.
     #[arg(long, short, default_value_t = 3)]
     max_retries: u8,
-
-    /// Path to prometheus output
-    #[arg(long)]
-    prom: Option<String>,
-
-    // Optional prometheus group
-    #[arg(long)]
-    prom_group: Option<String>,
-
-    /// Prometheus metrics file update interval
-    #[arg(long, default_value_t = 1_000)]
-    prom_save_interval: u64,
 
     #[command(subcommand)]
     action: Action,
@@ -164,7 +139,8 @@ impl Args {
             Action::CheckTree { pg_url, .. }
             | Action::CheckTrees { pg_url, .. }
             | Action::CheckTreeLeafs { pg_url, .. }
-            | Action::CheckTreesLeafs { pg_url, .. } => {
+            | Action::CheckTreesLeafs { pg_url, .. }
+            | Action::FixTree { pg_url, .. } => {
                 let options: PgConnectOptions = pg_url.parse().unwrap();
 
                 // Create postgres pool
@@ -179,6 +155,26 @@ impl Args {
             }
             Action::ShowTree { .. } | Action::ShowTrees { .. } => {
                 anyhow::bail!("show-tree and show-tress do not have connection to database")
+            }
+        }
+    }
+    async fn get_messenger_config(&self) -> anyhow::Result<MessengerConfig> {
+        match &self.action {
+            Action::FixTree { redis_url, .. } => {
+                let config_wrapper = figment::value::Value::from(map! {
+                    "redis_connection_str" => redis_url.to_string(),
+                    "pipeline_size_bytes" => 1u128.to_string(),
+                });
+                let config = config_wrapper.into_dict().unwrap();
+
+                let messenenger_config = MessengerConfig {
+                    messenger_type: plerkle_messenger::MessengerType::Redis,
+                    connection_config: config,
+                };
+                Ok(messenenger_config)
+            }
+            _ => {
+                anyhow::bail!("No redis client supported")
             }
         }
     }
@@ -228,6 +224,21 @@ enum Action {
         #[arg(short, long, help = "Path to file with trees pubkeys")]
         file: String,
     },
+    /// Submits txns for the missing gaps in a Merkle tree.
+    FixTree {
+        #[arg(short, long)]
+        pg_url: String,
+        #[arg(short, long)]
+        redis_url: String,
+        #[arg(short, long, help = "Tree pubkey")]
+        tree: String,
+        #[arg(
+            short,
+            long,
+            help = "Concurrency for fetching signatures for sequence batches"
+        )]
+        get_sigs_concurrency: Option<usize>,
+    },
 }
 
 #[tokio::main]
@@ -241,37 +252,16 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    // metrics
-    let mut labels: HashMap<String, String> = HashMap::new();
-    if let Some(group) = args.prom_group.clone() {
-        labels.insert("group".to_owned(), group);
-    }
-    let registry = Registry::new_custom(None, Some(labels))?;
-    registry.register(Box::new(TREE_STATUS_MAX_SEQ.clone()))?;
-    registry.register(Box::new(TREE_STATUS_MISSING_SEQ.clone()))?;
-    registry.register(Box::new(TREE_STATUS_LEAVES_COMPLETED.clone()))?;
-    registry.register(Box::new(TREE_STATUS_LEAVES_INCOMPLETE.clone()))?;
-    registry.register(Box::new(TREE_STATUS_MISSED_LEAVES.clone()))?;
-    let metrics_jh = save_metrics(
-        registry,
-        args.prom.clone(),
-        Duration::from_millis(args.prom_save_interval),
-    );
-
-    let concurrency_tx = (
-        args.concurrency_tx,
-        Arc::new(Semaphore::new(args.concurrency_tx)),
-    );
-    let signatures_history_queue = args.signatures_history_queue;
-    let max_retries = args.max_retries;
-    let mut tasks_tree = JoinSet::new();
+    let concurrency = NonZeroUsize::new(args.concurrency)
+        .ok_or_else(|| anyhow::anyhow!("invalid concurrency: {}", args.concurrency))?;
 
     // Set up RPC interface
     let pubkeys_str = match &args.action {
         Action::CheckTree { tree, .. }
         | Action::CheckTreeLeafs { tree, .. }
+        | Action::FixTree { tree, .. }
         | Action::ShowTree { tree } => {
-            let tree = tree.clone();
+            let tree = tree.to_string();
             stream::once(async move { Ok(tree) }).boxed()
         }
         Action::CheckTrees { file, .. }
@@ -300,6 +290,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Action::CheckTreeLeafs { output, .. } | Action::CheckTreesLeafs { output, .. } => {
+            let conn = args.get_pg_conn().await?;
             let mut output: Option<Pin<Box<dyn AsyncWrite>>> = if let Some(output) = output {
                 Some(if output == "-" {
                     Box::pin(stdout())
@@ -316,81 +307,66 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 None
             };
-            let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-            let tx = Arc::new(tx);
             while let Some(maybe_pubkey) = pubkeys.next().await {
                 let pubkey = maybe_pubkey?;
-                if tasks_tree.len() == args.concurrency_tree {
-                    loop {
-                        tokio::select! {
-                            _ = tasks_tree.join_next() => {
-                                break;
-                            }
-                            Some(text) = rx.recv() => {
-                                if let Some(output) = output.as_mut() {
-                                    let _ = output.write(text.as_bytes()).await?;
-                                }
-                            }
-                        }
-                    }
+                info!("checking tree leafs {pubkey}, hex: {}", hex::encode(pubkey));
+                if let Err(error) = check_tree_leafs(
+                    pubkey,
+                    &args.rpc,
+                    concurrency,
+                    args.max_retries,
+                    &conn,
+                    output.as_mut(),
+                )
+                .await
+                {
+                    error!("{:?}", error);
                 }
-                let rpc = args.rpc.clone();
-                let concurrency_tx = concurrency_tx.clone();
-                let conn = args.get_pg_conn().await?;
-                let tx = Arc::clone(&tx);
-                tasks_tree.spawn(async move {
-                    info!("checking tree leafs {pubkey}, hex: {}", hex::encode(pubkey));
-                    if let Err(error) = check_tree_leafs(
-                        pubkey,
-                        &rpc,
-                        signatures_history_queue,
-                        concurrency_tx,
-                        max_retries,
-                        &conn,
-                        tx,
-                    )
-                    .await
-                    {
-                        error!("{:?}", error);
-                    }
-                });
             }
-            drop(tx);
             if let Some(mut output) = output {
-                while let Some(text) = rx.recv().await {
-                    let _ = output.write(text.as_bytes()).await?;
-                }
                 output.flush().await?;
             }
         }
         Action::ShowTree { .. } | Action::ShowTrees { .. } => {
             while let Some(maybe_pubkey) = pubkeys.next().await {
                 let pubkey = maybe_pubkey?;
-                if tasks_tree.len() == args.concurrency_tree {
-                    tasks_tree.join_next().await;
+                info!("showing tree {pubkey}, hex: {}", hex::encode(pubkey));
+                if let Err(error) =
+                    read_tree(pubkey, &args.rpc, concurrency, args.max_retries).await
+                {
+                    error!("{:?}", error);
                 }
-                let rpc = args.rpc.clone();
-                let concurrency_tx = concurrency_tx.clone();
-                tasks_tree.spawn(async move {
-                    info!("showing tree {pubkey}, hex: {}", hex::encode(pubkey));
-                    if let Err(error) = read_tree(
-                        pubkey,
-                        &rpc,
-                        signatures_history_queue,
-                        concurrency_tx,
-                        max_retries,
-                    )
-                    .await
-                    {
-                        error!("{:?}", error);
-                    }
-                });
+            }
+        }
+        Action::FixTree {
+            get_sigs_concurrency,
+            pg_url: _,
+            redis_url: _,
+            tree: _,
+        } => {
+            let client = RpcClient::new(args.rpc.clone());
+            let conn = args.get_pg_conn().await?;
+            let messenger_config = args.get_messenger_config().await?;
+            if let Some(maybe_pubkey) = pubkeys.next().await {
+                let pubkey: Pubkey = maybe_pubkey?;
+                info!("fixing tree {pubkey}, hex: {}", hex::encode(pubkey));
+                if let Err(error) = fix_tree(
+                    pubkey,
+                    client,
+                    conn,
+                    messenger_config,
+                    Some(args.concurrency),
+                    get_sigs_concurrency.to_owned(),
+                )
+                .await
+                {
+                    error!("{:?}", error);
+                }
             }
         }
     }
-    while tasks_tree.join_next().await.is_some() {}
 
-    metrics_jh.await
+    Ok(())
 }
 
 async fn check_tree(
@@ -398,7 +374,7 @@ async fn check_tree(
     client: &RpcClient,
     conn: &DatabaseConnection,
 ) -> anyhow::Result<()> {
-    let seq = get_tree_latest_seq(pubkey, client)
+    let onchain_seq: i64 = get_onchain_tree_seq(pubkey, client)
         .await
         .with_context(|| format!("[{pubkey}] tree is missing from chain or error occured"))?
         .try_into()
@@ -406,54 +382,349 @@ async fn check_tree(
 
     let indexed_seq = get_tree_max_seq(pubkey, conn)
         .await
-        .with_context(|| format!("[{pubkey:?}] coundn't query tree from index"))?
+        .with_context(|| format!("[{pubkey:?}] counldn't query tree from index"))?
         .ok_or_else(|| anyhow::anyhow!("[{pubkey}] tree missing from index"))?;
 
     // Check tip
-    match indexed_seq.max_seq.cmp(&seq) {
+    match indexed_seq.max_seq.cmp(&onchain_seq) {
         cmp::Ordering::Less => {
-            error!(
-                "[{pubkey}] tree not fully indexed: {} < {seq}",
-                indexed_seq.max_seq
+            warn!(
+                "[{pubkey}] Tree not fully indexed. On-chain seq: {}. Indexed seq: {}",
+                onchain_seq, indexed_seq.max_seq
             );
         }
-        cmp::Ordering::Equal => {}
+        cmp::Ordering::Equal => {
+            info!("[{pubkey}] Tree is up-to-date! Seq: {}", onchain_seq)
+        }
         cmp::Ordering::Greater => {
-            error!("[{pubkey}] indexer error: {} > {seq}", indexed_seq.max_seq);
+            error!(
+                "[{pubkey}] Something went wrong. Indexer is ahead of the chain? On-chain seq: {}. Indexed seq: {}",
+                onchain_seq, indexed_seq.max_seq
+            );
         }
     }
 
     // Check completeness
     if indexed_seq.max_seq != indexed_seq.cnt_seq {
-        error!(
-            "[{pubkey}] tree has gaps {} != {}",
+        warn!(
+            "[{pubkey}] Tree has gaps. Max indexed seq: {}. Distinct seqs: {}",
             indexed_seq.max_seq, indexed_seq.cnt_seq
         );
-    }
-    let pubkey_str = pubkey.to_string();
-    TREE_STATUS_MAX_SEQ
-        .with_label_values(&[&pubkey_str])
-        .set(indexed_seq.max_seq);
-
-    if indexed_seq.max_seq == seq && indexed_seq.max_seq == indexed_seq.cnt_seq {
-        info!("[{:?}] indexing is complete, seq={:?}", pubkey, seq)
+        let missing_seqs = get_missing_seq(pubkey, onchain_seq, conn).await?;
+        warn!(
+            "[{pubkey}] missing seq ranges: {:?}",
+            build_seq_ranges(missing_seqs)
+        );
     } else {
-        error!("[{pubkey}] indexing is failed, seq={seq} max_seq={indexed_seq:?}");
-        match get_missing_seq(pubkey, seq, conn).await {
-            Ok(seqs) => {
-                TREE_STATUS_MISSING_SEQ
-                    .with_label_values(&[&pubkey_str])
-                    .set(seqs.len() as i64);
-                error!("[{pubkey}] missing seq: {seqs:?}")
-            }
-            Err(error) => error!("[{pubkey}] failed to query missing seq: {error:?}"),
-        }
+        info!("[{:?}] Tree has no gaps!", pubkey)
     }
-
     Ok(())
 }
 
-async fn get_tree_latest_seq(address: Pubkey, client: &RpcClient) -> anyhow::Result<u64> {
+async fn fix_tree(
+    pubkey: Pubkey,
+    client: RpcClient,
+    conn: DatabaseConnection,
+    messenger_config: MessengerConfig,
+    get_txn_concurrency: Option<usize>,
+    get_sigs_concurrency: Option<usize>,
+) -> anyhow::Result<()> {
+    let onchain_seq: i64 = get_onchain_tree_seq(pubkey, &client)
+        .await
+        .with_context(|| format!("[{pubkey}] tree is missing from chain or error occured"))?
+        .try_into()
+        .unwrap();
+
+    let indexed_seq = get_tree_max_seq(pubkey, &conn)
+        .await
+        .with_context(|| format!("[{pubkey:?}] counldn't query tree from index"))?
+        .ok_or_else(|| anyhow::anyhow!("[{pubkey}] tree missing from index"))?;
+
+    match indexed_seq.max_seq.cmp(&onchain_seq) {
+        cmp::Ordering::Less => {
+            warn!(
+                "[{pubkey}] Tree not fully indexed. On-chain seq: {}. Indexed seq: {}",
+                onchain_seq, indexed_seq.max_seq
+            );
+        }
+        cmp::Ordering::Equal => {
+            info!("[{pubkey}] Tree is up-to-date! Seq: {}", onchain_seq)
+        }
+        cmp::Ordering::Greater => {
+            error!(
+                "[{pubkey}] Something went wrong. Indexer is ahead of the chain? On-chain seq: {}. Indexed seq: {}",
+                onchain_seq, indexed_seq.max_seq
+            );
+        }
+    }
+
+    // Check completeness
+    if indexed_seq.max_seq != indexed_seq.cnt_seq {
+        warn!(
+            "[{pubkey}] Tree has gaps. Max indexed seq: {}. Distinct seqs: {}",
+            indexed_seq.max_seq, indexed_seq.cnt_seq
+        );
+        let missing_seqs = get_missing_seq(pubkey, onchain_seq, &conn).await?;
+        trace!("[{pubkey}] missing seq: {:?}", missing_seqs);
+        find_and_forward_txns_for_missing_seqs(
+            pubkey,
+            missing_seqs,
+            client,
+            conn,
+            messenger_config,
+            get_txn_concurrency,
+            get_sigs_concurrency,
+        )
+        .await?;
+    } else {
+        info!(
+            "[{:?}] Tree has no gaps! Indexed Seq: {:?}",
+            pubkey, indexed_seq.max_seq
+        )
+    }
+    Ok(())
+}
+
+async fn find_and_forward_txns_for_missing_seqs(
+    tree: Pubkey,
+    seqs: Vec<i64>,
+    client: RpcClient,
+    conn: DatabaseConnection,
+    messenger_config: MessengerConfig,
+    get_txn_concurrency: Option<usize>,
+    get_sigs_concurrency: Option<usize>,
+) -> anyhow::Result<()> {
+    // Concurrency config
+    let get_txn_concurrency: usize = get_txn_concurrency.unwrap_or(20);
+    let get_sigs_concurrency: usize = get_sigs_concurrency.unwrap_or(3);
+
+    let (r_sender, r_recv) = unbounded();
+    let (s_sender, s_recv) = unbounded();
+
+    let client = Arc::new(client);
+    let conn = Arc::new(conn);
+    let messenger = init_redis_messenger(messenger_config).await?;
+
+    crossbeam::scope(|s| {
+        let runtime = Arc::new(
+            Builder::new_multi_thread()
+                .enable_all()
+                .worker_threads(4)
+                .build()
+                .unwrap(),
+        );
+
+        s.spawn(|_| {
+            let ranges = build_seq_ranges(seqs);
+            info!("Processing seq ranges: {:?}", ranges);
+            for range in ranges {
+                r_sender.send(range).unwrap();
+            }
+            drop(r_sender);
+        });
+
+        for _ in 0..get_sigs_concurrency {
+            let (s_sender, r_recv) = (s_sender.clone(), r_recv.clone());
+            let client = client.clone();
+            let conn = conn.clone();
+            let runtime = runtime.clone();
+            // Spawn workers in separate threads
+            s.spawn(move |_| {
+                for range in r_recv.iter() {
+                    info!("Processing seq range: {:?}", range);
+                    match runtime.block_on(find_signatures_for_missing_seq_range(
+                        tree, range, &client, &conn, &s_sender,
+                    )) {
+                        Ok(_) => {}
+                        Err(err) => {
+                            warn!("error processing seq range: {:?}, error: {:?}", range, err)
+                        }
+                    }
+                }
+            });
+        }
+        drop(s_sender);
+
+        for _ in 0..get_txn_concurrency {
+            let s_recv = s_recv.clone();
+            let client = client.clone();
+            let messenger = messenger.clone();
+            let runtime = runtime.clone();
+            s.spawn(move |_| {
+                for sig in s_recv.iter() {
+                    trace!("Attempting to send signature to redis: {:?}", sig);
+                    runtime
+                        .block_on(send_txn(sig, &client, &messenger))
+                        .unwrap();
+                }
+            });
+        }
+    })
+    .unwrap();
+
+    anyhow::Ok(())
+}
+
+async fn init_redis_messenger(
+    config: MessengerConfig,
+) -> anyhow::Result<Arc<Mutex<Box<dyn plerkle_messenger::Messenger>>>> {
+    let mut messenger = plerkle_messenger::select_messenger(config).await?;
+    messenger.add_stream(TRANSACTION_STREAM).await?;
+    messenger
+        .set_buffer_size(TRANSACTION_STREAM, 10000000000000000)
+        .await;
+    anyhow::Ok(Arc::new(Mutex::new(messenger)))
+}
+
+async fn send_txn(
+    signature: Signature,
+    client: &RpcClient,
+    messenger: &Mutex<Box<dyn plerkle_messenger::Messenger>>,
+) -> anyhow::Result<()> {
+    let txn: EncodedConfirmedTransactionWithStatusMeta = rpc_tx_with_retries(
+        &client,
+        RpcRequest::GetTransaction,
+        serde_json::json!([signature.to_string(), RPC_TXN_CONFIG,]),
+        RPC_GET_TXN_RETRIES,
+        signature,
+    )
+    .await?;
+
+    // Ignore if tx failed or meta is missed
+    let meta = txn.transaction.meta.as_ref();
+    if meta.map(|meta| meta.status.is_err()).unwrap_or(true) {
+        info!("Dropping failed transaction: {:?}", signature);
+        return Ok(());
+    }
+
+    let fbb = flatbuffers::FlatBufferBuilder::new();
+    let fbb = seralize_encoded_transaction_with_status(fbb, txn)
+        .with_context(|| format!("failed to serialize transaction with {}", signature))?;
+    let bytes = fbb.finished_data();
+
+    let mut locked = messenger.lock().await;
+    locked.send(TRANSACTION_STREAM, bytes).await?;
+    drop(locked);
+    info!("Successfully pushed transaction to redis: {:?}", signature);
+    Ok(())
+}
+
+fn build_seq_ranges(seqs: Vec<i64>) -> Vec<(i64, i64)> {
+    let mut ranges: Vec<(i64, i64)> = Vec::new();
+    if seqs.is_empty() {
+        return ranges;
+    }
+
+    let mut current_start = seqs[0];
+    let mut current_end = seqs[0];
+    for &num in seqs.iter().skip(1) {
+        if current_end + 1 == num {
+            current_end = num;
+        } else {
+            ranges.push((current_start, current_end));
+            current_start = num;
+            current_end = num;
+        }
+    }
+    ranges.push((current_start, current_end));
+
+    // Two ranges will be joined if within this gap.
+    // This will reduce the calls to GetSignaturesForAddress which will improve overall performance.
+    let maximum_join_gap: i32 = 10;
+    let mut joined_ranges: Vec<(i64, i64)> = Vec::new();
+    let (mut current_start, mut current_end) = ranges[0];
+    for (start, end) in ranges.iter().skip(1) {
+        if current_end + maximum_join_gap as i64 >= *start {
+            current_end = *end;
+        } else {
+            joined_ranges.push((current_start, current_end));
+            current_start = *start;
+            current_end = *end;
+        }
+    }
+    joined_ranges.push((current_start, current_end));
+
+    joined_ranges
+}
+
+// TODO: Txns submitted not be the right ones! We need a more complex search algo.
+// Add the following:
+//   1 – Keep searching until finding a successful transaction.
+//   2 – Parse txns and extract seq, keep searching until the seq is found (can use Helius for this).
+async fn find_signatures_for_missing_seq_range(
+    tree: Pubkey,
+    range: (i64, i64),
+    client: &RpcClient,
+    conn: &DatabaseConnection,
+    sender: &Sender<Signature>,
+) -> anyhow::Result<()> {
+    let (start, end) = range;
+    trace!("Filling gap for range: [{:?}, {:?}]", start, end);
+
+    // Find the next indexed after the end of the range.
+    let before_txn = cl_audits::Entity::find()
+        .filter(cl_audits::Column::Tree.eq(tree.as_ref()))
+        .filter(cl_audits::Column::Seq.gte(end))
+        .order_by_asc(cl_audits::Column::Seq)
+        .limit(1)
+        .all(conn)
+        .await?;
+    let before_txn = before_txn.first();
+
+    // Find the indexed seq before the start of the range.
+    let until_txn = cl_audits::Entity::find()
+        .filter(cl_audits::Column::Tree.eq(tree.as_ref()))
+        .filter(cl_audits::Column::Seq.lte(start))
+        .order_by_desc(cl_audits::Column::Seq)
+        .limit(1)
+        .all(conn)
+        .await?;
+    let until_txn = until_txn.first();
+
+    trace!(
+        "Txns for missing seq range [{:?}, {:?}]. Until (start): {:?}. Before (end): {:?}.",
+        start,
+        end,
+        until_txn
+            .as_ref()
+            .map_or("None".to_string(), |txn| txn.tx.clone()),
+        before_txn
+            .as_ref()
+            .map_or("None".to_string(), |txn| txn.tx.clone()),
+    );
+
+    let mut before = before_txn
+        .map(|txn| Signature::from_str(&txn.tx).ok())
+        .flatten();
+
+    let until = until_txn
+        .map(|txn| Signature::from_str(&txn.tx).ok())
+        .flatten();
+    let limit: usize = 1000;
+    loop {
+        let config = GetConfirmedSignaturesForAddress2Config {
+            before: before,
+            until: until,
+            limit: Some(limit),
+            ..Default::default()
+        };
+        let sigs = client
+            .get_signatures_for_address_with_config(&tree, config)
+            .await?;
+        for sig in sigs.clone() {
+            let o = Signature::from_str(&sig.signature)?;
+            sender.send(o)?;
+            before = Some(o);
+        }
+        if sigs.len() == 0 {
+            break;
+        }
+    }
+
+    return anyhow::Ok(());
+}
+
+async fn get_onchain_tree_seq(address: Pubkey, client: &RpcClient) -> anyhow::Result<u64> {
     // get account info
     let account_info = client
         .get_account_with_commitment(&address, CommitmentConfig::confirmed())
@@ -481,21 +752,22 @@ async fn get_tree_max_seq(
     tree: Pubkey,
     conn: &DatabaseConnection,
 ) -> Result<Option<MaxSeqItem>, DbErr> {
-    let query = cl_items::Entity::find()
+    let query = cl_audits::Entity::find()
         .select_only()
-        .filter(cl_items::Column::Tree.eq(tree.as_ref()))
-        .column_as(Expr::col(cl_items::Column::Seq).max(), "max_seq")
+        .filter(cl_audits::Column::Tree.eq(tree.as_ref()))
+        .column_as(Expr::col(cl_audits::Column::Seq).max(), "max_seq")
         .column_as(Expr::cust("count(distinct seq)"), "cnt_seq")
         .build(DbBackend::Postgres);
 
     MaxSeqItem::find_by_statement(query).one(conn).await
 }
 
+// TODO: Break checks into batches for larger trees.
 async fn get_missing_seq(
     tree: Pubkey,
     max_seq: i64,
     conn: &DatabaseConnection,
-) -> Result<Vec<MissingSeq>, DbErr> {
+) -> Result<Vec<i64>, DbErr> {
     let query = Statement::from_string(
         DbBackend::Postgres,
         format!(
@@ -506,42 +778,36 @@ FROM
     generate_series(1::bigint, {}::bigint) s(seq)
 WHERE
     NOT EXISTS (
-        SELECT 1 FROM cl_items WHERE seq = s.seq AND tree='\\x{}'
+        SELECT 1 FROM cl_audits WHERE seq = s.seq AND tree='\\x{}'
     )",
             max_seq,
             hex::encode(tree.as_ref())
         ),
     );
 
-    Ok(conn
+    let res: Vec<MissingSeq> = conn
         .query_all(query)
         .await?
         .iter()
         .map(|q| MissingSeq::from_query_result(q, "").unwrap())
-        .collect())
+        .collect();
+    Ok(res.iter().map(|m| m.missing_seq).collect::<Vec<i64>>())
 }
 
 async fn check_tree_leafs(
     pubkey: Pubkey,
     client_url: &str,
-    signatures_history_queue: usize,
-    concurrency_tx: (usize, Arc<Semaphore>),
+    concurrency: NonZeroUsize,
     max_retries: u8,
     conn: &DatabaseConnection,
-    tx: Arc<mpsc::UnboundedSender<String>>,
+    mut output: Option<&mut Pin<Box<dyn AsyncWrite>>>,
 ) -> anyhow::Result<()> {
-    let (fetch_fut, mut leafs_rx) = read_tree_start(
-        pubkey,
-        client_url,
-        signatures_history_queue,
-        concurrency_tx,
-        max_retries,
-    );
+    let (fetch_fut, mut leafs_rx) = read_tree_start(pubkey, client_url, concurrency, max_retries);
     try_join(fetch_fut, async move {
         // collect max seq per leaf index from transactions
         let mut leafs = HashMap::new();
-        while let Some((_id, signature, seqs)) = leafs_rx.recv().await {
-            for (seq, maybe_leaf) in seqs {
+        while let Some((_id, signature, vec)) = leafs_rx.recv().await {
+            for (seq, maybe_leaf) in vec.unwrap_or_default() {
                 if let Some(LeafNode {
                     index: leaf_idx,
                     leaf: _leaf,
@@ -597,19 +863,11 @@ GROUP BY
                 }
             }
         }
-
-        if leafs.is_empty() {
-            TREE_STATUS_LEAVES_COMPLETED.inc();
-        } else {
-            TREE_STATUS_LEAVES_INCOMPLETE.inc();
-        }
-
         for (leaf_idx, (signature, seq)) in leafs.into_iter() {
             error!("leaf index {leaf_idx}: not found in db, seq {seq} tx={signature:?}");
-            let _ = tx.send(format!("{signature}\n"));
-            TREE_STATUS_MISSED_LEAVES
-                .with_label_values(&[&pubkey.to_string()])
-                .inc();
+            if let Some(output) = output.as_mut() {
+                let _ = output.write(format!("{signature}\n").as_bytes()).await?;
+            }
         }
 
         Ok(())
@@ -622,24 +880,17 @@ GROUP BY
 async fn read_tree(
     pubkey: Pubkey,
     client_url: &str,
-    signatures_history_queue: usize,
-    concurrency_tx: (usize, Arc<Semaphore>),
+    concurrency: NonZeroUsize,
     max_retries: u8,
 ) -> anyhow::Result<()> {
-    fn print_seqs(id: usize, sig: Signature, seqs: Vec<(u64, MaybeLeafNode)>) {
-        for (seq, leaf_idx) in seqs {
+    fn print_seqs(id: usize, sig: Signature, seqs: Option<Vec<(u64, MaybeLeafNode)>>) {
+        for (seq, leaf_idx) in seqs.unwrap_or_default() {
             let leaf_idx = leaf_idx.map(|v| v.index.to_string()).unwrap_or_default();
             info!("{seq} {leaf_idx} {sig} {id}");
         }
     }
 
-    let (fetch_fut, mut print_rx) = read_tree_start(
-        pubkey,
-        client_url,
-        signatures_history_queue,
-        concurrency_tx,
-        max_retries,
-    );
+    let (fetch_fut, mut print_rx) = read_tree_start(pubkey, client_url, concurrency, max_retries);
     try_join(fetch_fut, async move {
         let mut next_id = 0;
         let mut map = HashMap::new();
@@ -669,33 +920,32 @@ async fn read_tree(
 fn read_tree_start(
     pubkey: Pubkey,
     client_url: &str,
-    signatures_history_queue: usize,
-    (concurrency_tx_max, concurrency_tx): (usize, Arc<Semaphore>),
+    concurrency: NonZeroUsize,
     max_retries: u8,
 ) -> (
     BoxFuture<'static, anyhow::Result<()>>,
-    mpsc::UnboundedReceiver<(usize, Signature, Vec<(u64, MaybeLeafNode)>)>,
+    mpsc::UnboundedReceiver<(usize, Signature, Option<Vec<(u64, MaybeLeafNode)>>)>,
 ) {
     let sig_id = Arc::new(AtomicUsize::new(0));
     let rx_sig = Arc::new(Mutex::new(find_signatures(
         pubkey,
         RpcClient::new(client_url.to_owned()),
-        max_retries,
-        signatures_history_queue,
+        None,
+        None,
+        2_000,
+        false,
     )));
 
     let (tx, rx) = mpsc::unbounded_channel();
     let tx = Arc::new(tx);
 
-    let fetch_futs = (0..concurrency_tx_max)
+    let fetch_futs = (0..concurrency.get())
         .map(|_| {
             let sig_id = Arc::clone(&sig_id);
             let rx_sig = Arc::clone(&rx_sig);
             let client = RpcClient::new(client_url.to_owned());
-            let concurrency_tx = Arc::clone(&concurrency_tx);
             let tx = Arc::clone(&tx);
             async move {
-                let _permit = concurrency_tx.acquire_owned().await.unwrap();
                 loop {
                     let mut lock = rx_sig.lock().await;
                     let maybe_msg = lock.recv().await;
@@ -708,8 +958,7 @@ fn read_tree_start(
                         Some(maybe_sig) => {
                             let signature = maybe_sig?;
                             let mut map = process_tx(signature, &client, max_retries).await?;
-                            let _ =
-                                tx.send((id, signature, map.remove(&pubkey).unwrap_or_default()));
+                            let _ = tx.send((id, signature, map.remove(&pubkey)));
                         }
                         None => return Ok::<(), anyhow::Error>(()),
                     }
@@ -736,7 +985,7 @@ async fn process_tx(
         max_supported_transaction_version: Some(0),
     };
 
-    let tx: EncodedConfirmedTransactionWithStatusMeta = rpc_send_with_retries(
+    let tx: EncodedConfirmedTransactionWithStatusMeta = rpc_tx_with_retries(
         client,
         RpcRequest::GetTransaction,
         serde_json::json!([signature.to_string(), CONFIG]),
@@ -794,7 +1043,7 @@ fn parse_tx_sequence(
                                 AccountCompressionEvent::try_from_slice(&data)
                             {
                                 let ChangeLogEvent::V1(cl_data) = cl_data;
-                                let leaf = cl_data.path.first().map(|node| LeafNode {
+                                let leaf = cl_data.path.get(0).map(|node| LeafNode {
                                     leaf: node.node.to_vec(),
                                     index: node_idx_to_leaf_idx(
                                         node.index as i64,
@@ -815,6 +1064,6 @@ fn parse_tx_sequence(
     Ok(seq_updates)
 }
 
-const fn node_idx_to_leaf_idx(index: i64, tree_height: u32) -> i64 {
+fn node_idx_to_leaf_idx(index: i64, tree_height: u32) -> i64 {
     index - 2i64.pow(tree_height)
 }

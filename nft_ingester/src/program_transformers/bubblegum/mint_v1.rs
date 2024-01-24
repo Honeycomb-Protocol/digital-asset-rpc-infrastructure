@@ -23,13 +23,16 @@ use digital_asset_types::{
 };
 use log::warn;
 use num_traits::FromPrimitive;
-use sea_orm::{query::*, ConnectionTrait, JsonValue};
+use sea_orm::{
+    entity::*, query::*, sea_query::OnConflict, ConnectionTrait, DbBackend, EntityTrait, JsonValue,
+};
 
+// TODO -> consider moving structs into these functions to avoid clone
 pub async fn mint_v1<'c, T>(
     parsing_result: &BubblegumInstruction,
     bundle: &InstructionBundle<'c>,
     txn: &'c T,
-    cl_audits: bool,
+    instruction: &str,
 ) -> Result<Option<TaskData>, IngesterError>
 where
     T: ConnectionTrait + TransactionTrait,
@@ -47,7 +50,7 @@ where
         &parsing_result.tree_update,
         &parsing_result.payload,
     ) {
-        let seq = save_changelog_event(cl, bundle.slot, bundle.txn_id, txn, cl_audits).await?;
+        let seq = save_changelog_event(cl, bundle.slot, bundle.txn_id, txn, instruction).await?;
         let metadata = args;
         #[allow(unreachable_patterns)]
         return match le.schema {
@@ -60,7 +63,7 @@ where
             } => {
                 let id_bytes = id.to_bytes();
                 let slot_i = bundle.slot as i64;
-                let uri = metadata.uri.replace('\0', "");
+                let uri = metadata.uri.trim().replace('\0', "");
                 let name = metadata.name.clone().into_bytes();
                 let symbol = metadata.symbol.clone().into_bytes();
                 let mut chain_data = ChainDataV1 {

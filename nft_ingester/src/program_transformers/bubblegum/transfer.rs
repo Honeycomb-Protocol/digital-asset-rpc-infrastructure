@@ -16,15 +16,14 @@ pub async fn transfer<'c, T>(
     parsing_result: &BubblegumInstruction,
     bundle: &InstructionBundle<'c>,
     txn: &'c T,
-    cl_audits: bool,
+    instruction: &str,
 ) -> Result<(), IngesterError>
 where
     T: ConnectionTrait + TransactionTrait,
 {
     if let (Some(le), Some(cl)) = (&parsing_result.leaf_update, &parsing_result.tree_update) {
-        let seq = save_changelog_event(cl, bundle.slot, bundle.txn_id, txn, cl_audits).await?;
-
-        match le.schema {
+        let seq = save_changelog_event(cl, bundle.slot, bundle.txn_id, txn, instruction).await?;
+        return match le.schema {
             LeafSchema::V1 {
                 id,
                 owner,
@@ -75,7 +74,7 @@ where
 
                 return Ok(());
             }
-        }
+        };
     }
     Err(IngesterError::ParsingError(
         "Ix not parsed correctly".to_string(),

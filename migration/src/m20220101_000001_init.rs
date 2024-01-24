@@ -34,6 +34,7 @@ impl MigrationTrait for Migration {
             DROP TABLE IF EXISTS `asset_creators`;
             DROP TABLE IF EXISTS `tokens`;
             DROP TABLE IF EXISTS `token_accounts`;
+            DROP TABLE IF EXISTS `raw_txn`;
         "#;
         let stmt = Statement::from_string(manager.get_database_backend(), sql.to_owned());
         manager.get_connection().execute(stmt).await.map(|_| ())

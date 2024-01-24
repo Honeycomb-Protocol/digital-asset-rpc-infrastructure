@@ -5,11 +5,10 @@ use {
     futures::{future::try_join_all, stream::StreamExt},
     log::{info, warn},
     mpl_token_metadata::{pda::find_metadata_account, state::Metadata},
-    plerkle_messenger::{MessengerConfig, ACCOUNT_BACKFILL_STREAM},
+    plerkle_messenger::{MessengerConfig, ACCOUNT_STREAM},
     plerkle_serialization::{
         serializer::serialize_account, solana_geyser_plugin_interface_shims::ReplicaAccountInfoV2,
     },
-    prometheus::{IntCounter, Registry},
     solana_account_decoder::{UiAccount, UiAccountEncoding},
     solana_client::{
         nonblocking::rpc_client::RpcClient,
@@ -29,15 +28,9 @@ use {
         UiParsedInstruction, UiTransactionEncoding,
     },
     std::{collections::HashSet, env, str::FromStr, sync::Arc},
-    tokio::{sync::Mutex, time::Duration},
-    txn_forwarder::{find_signatures, read_lines, rpc_send_with_retries, save_metrics},
+    tokio::sync::Mutex,
+    txn_forwarder::{find_signatures, read_lines, rpc_tx_with_retries},
 };
-
-lazy_static::lazy_static! {
-    pub static ref ACC_FORWARDER_SENT: IntCounter = IntCounter::new(
-        "acc_forwarder_sent", "Number of sent accounts"
-    ).unwrap();
-}
 
 #[derive(Parser)]
 #[command(next_line_help = true)]
@@ -46,15 +39,6 @@ struct Args {
     redis_url: String,
     #[arg(long)]
     rpc_url: String,
-    /// Size of signatures queue
-    #[arg(long, default_value_t = 25_000)]
-    signatures_history_queue: usize,
-    /// Path to prometheus output
-    #[arg(long)]
-    prom: Option<String>,
-    /// Prometheus metrics file update interval
-    #[arg(long, default_value_t = 1_000)]
-    prom_save_interval: u64,
     #[command(subcommand)]
     action: Action,
 }
@@ -117,20 +101,11 @@ async fn main() -> anyhow::Result<()> {
     let mut messenger = plerkle_messenger::select_messenger(messenger_config)
         .await
         .unwrap();
-    messenger.add_stream(ACCOUNT_BACKFILL_STREAM).await.unwrap();
+    messenger.add_stream(ACCOUNT_STREAM).await.unwrap();
     messenger
-        .set_buffer_size(ACCOUNT_BACKFILL_STREAM, 10000000000000000)
+        .set_buffer_size(ACCOUNT_STREAM, 10000000000000000)
         .await;
     let messenger = Arc::new(Mutex::new(messenger));
-
-    // metrics
-    let registry = Registry::new();
-    registry.register(Box::new(ACC_FORWARDER_SENT.clone()))?;
-    let metrics_jh = save_metrics(
-        registry,
-        args.prom,
-        Duration::from_millis(args.prom_save_interval),
-    );
 
     let client = RpcClient::new(args.rpc_url.clone());
 
@@ -143,10 +118,42 @@ async fn main() -> anyhow::Result<()> {
         Action::Scenario { scenario_file } => {
             let mut accounts = read_lines(&scenario_file).await?;
             while let Some(maybe_account) = accounts.next().await {
-                let pubkey = maybe_account?.parse()?;
-                fetch_and_send_account(pubkey, &client, &messenger).await?;
+                match maybe_account {
+                    Ok(account) => match account.parse() {
+                        Ok(mint) => {
+                            let metadata_account = find_metadata_account(&mint).0;
+                            let token_account = get_token_largest_account(&client, mint).await;
+
+                            match token_account {
+                                Ok(token_account) => {
+                                    for pubkey in &[mint, metadata_account, token_account] {
+                                        match fetch_and_send_account(*pubkey, &client, &messenger)
+                                            .await
+                                        {
+                                            Ok(_) => {}
+                                            Err(e) => {
+                                                warn!("Failed to fetch and send account: {:?}", e);
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => warn!("Failed to find mint account: {:?}", e),
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to parse account: {:?}", e);
+                            continue;
+                        }
+                    },
+                    Err(e) => {
+                        warn!("Failed to get next account: {:?}", e);
+                        continue;
+                    }
+                }
             }
         }
+
         Action::Mint { mint } => {
             let mint =
                 Pubkey::from_str(&mint).with_context(|| format!("failed to parse mint {mint}"))?;
@@ -171,10 +178,7 @@ async fn main() -> anyhow::Result<()> {
             let collection = Pubkey::from_str(&collection)
                 .with_context(|| format!("failed to parse collection {collection}"))?;
             let stream = Arc::new(Mutex::new(find_signatures(
-                collection,
-                client,
-                3, // max_retries
-                args.signatures_history_queue,
+                collection, client, None, None, 2_000, false,
             )));
 
             try_join_all((0..concurrency).map(|_| {
@@ -221,7 +225,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    metrics_jh.await
+    Ok(())
 }
 
 // https://github.com/metaplex-foundation/get-collection/blob/main/get-collection-rs/src/crawl.rs
@@ -238,7 +242,7 @@ async fn collection_get_tx_info(
         max_supported_transaction_version: Some(u8::MAX),
     };
 
-    let tx: EncodedConfirmedTransactionWithStatusMeta = rpc_send_with_retries(
+    let tx: EncodedConfirmedTransactionWithStatusMeta = rpc_tx_with_retries(
         client,
         RpcRequest::GetTransaction,
         serde_json::json!([signature.to_string(), CONFIG]),
@@ -334,7 +338,7 @@ async fn fetch_metadata_and_send_accounts(
 
 // returns largest (NFT related) token account belonging to mint
 async fn get_token_largest_account(client: &RpcClient, mint: Pubkey) -> anyhow::Result<Pubkey> {
-    let response: RpcResponse<Vec<RpcTokenAccountBalance>> = rpc_send_with_retries(
+    let response: RpcResponse<Vec<RpcTokenAccountBalance>> = rpc_tx_with_retries(
         client,
         RpcRequest::Custom {
             method: "getTokenLargestAccounts",
@@ -363,7 +367,7 @@ async fn fetch_account(pubkey: Pubkey, client: &RpcClient) -> anyhow::Result<(Ac
         min_context_slot: None,
     };
 
-    let response: RpcResponse<Option<UiAccount>> = rpc_send_with_retries(
+    let response: RpcResponse<Option<UiAccount>> = rpc_tx_with_retries(
         client,
         RpcRequest::GetAccountInfo,
         serde_json::json!([pubkey.to_string(), CONFIG]),
@@ -416,13 +420,8 @@ async fn send_account(
     let fbb = serialize_account(fbb, &account_info, slot, is_startup);
     let bytes = fbb.finished_data();
 
-    messenger
-        .lock()
-        .await
-        .send(ACCOUNT_BACKFILL_STREAM, bytes)
-        .await?;
+    messenger.lock().await.send(ACCOUNT_STREAM, bytes).await?;
     info!("sent account {} to stream", pubkey);
-    ACC_FORWARDER_SENT.inc();
 
     Ok(())
 }

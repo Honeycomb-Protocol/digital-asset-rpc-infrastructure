@@ -2,7 +2,7 @@ use crate::DasApiError;
 use async_trait::async_trait;
 use digital_asset_types::rpc::filter::SearchConditionType;
 use digital_asset_types::rpc::options::Options;
-use digital_asset_types::rpc::response::AssetList;
+use digital_asset_types::rpc::response::{AssetList, TransactionSignatureList};
 use digital_asset_types::rpc::{filter::AssetSorting, response::GetGroupingResponse};
 use digital_asset_types::rpc::{
     Asset, AssetProof, CompressedData, Interface, OwnershipModel, RoyaltyModel,
@@ -14,6 +14,27 @@ use std::collections::HashMap;
 
 mod api_impl;
 pub use api_impl::*;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct LeafTreePayload {
+    pub tree: String,
+    pub leaf_idx: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct GetCompressedAccounts {
+    pub program_id: String,
+    pub account_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct GetCharacters {
+    pub wallet: String,
+    pub merkle_tree: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -66,27 +87,6 @@ pub struct GetAssets {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct GetAssetProof {
     pub id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct LeafTreePayload {
-    pub tree: String,
-    pub leaf_idx: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct GetCompressedAccounts {
-    pub program_id: String,
-    pub account_name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct GetCharacters {
-    pub wallet: String,
-    pub merkle_tree: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -170,16 +170,30 @@ pub struct GetGrouping {
     pub group_value: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct GetSignaturesForAsset {
+    pub id: Option<String>,
+    pub limit: Option<u32>,
+    pub page: Option<u32>,
+    pub before: Option<String>,
+    pub after: Option<String>,
+    pub tree: Option<String>,
+    pub leaf_index: Option<i64>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
 #[document_rpc]
 #[async_trait]
 pub trait ApiContract: Send + Sync + 'static {
     async fn check_health(&self) -> Result<(), DasApiError>;
     #[rpc(
-        name = "getAssetProof",
+        name = "getProof",
         params = "named",
-        summary = "Get a merkle proof for a compressed asset by its ID"
+        summary = "Get a merkle proof for a leaf of a mt"
     )]
-    async fn get_asset_proof(&self, payload: GetAssetProof) -> Result<AssetProof, DasApiError>;
+    async fn get_proof(&self, payload: LeafTreePayload) -> Result<AssetProof, DasApiError>;
     #[rpc(
         name = "getCompressedData",
         params = "named",
@@ -208,11 +222,11 @@ pub trait ApiContract: Send + Sync + 'static {
         payload: GetCharacters,
     ) -> Result<Vec<CompressedData>, DasApiError>;
     #[rpc(
-        name = "getProof",
+        name = "getAssetProof",
         params = "named",
-        summary = "Get a merkle proof for a leaf of a mt"
+        summary = "Get a merkle proof for a compressed asset by its ID"
     )]
-    async fn get_proof(&self, payload: LeafTreePayload) -> Result<AssetProof, DasApiError>;
+    async fn get_asset_proof(&self, payload: GetAssetProof) -> Result<AssetProof, DasApiError>;
     #[rpc(
         name = "getAssetProofs",
         params = "named",
@@ -282,4 +296,13 @@ pub trait ApiContract: Send + Sync + 'static {
         summary = "Get a list of assets grouped by a specific authority"
     )]
     async fn get_grouping(&self, payload: GetGrouping) -> Result<GetGroupingResponse, DasApiError>;
+    #[rpc(
+        name = "getSignaturesForAsset",
+        params = "named",
+        summary = "Get transaction signatures for an asset"
+    )]
+    async fn get_signatures_for_asset(
+        &self,
+        payload: GetSignaturesForAsset,
+    ) -> Result<TransactionSignatureList, DasApiError>;
 }

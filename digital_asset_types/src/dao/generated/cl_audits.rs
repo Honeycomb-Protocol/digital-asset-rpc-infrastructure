@@ -24,6 +24,7 @@ pub struct Model {
     pub hash: Vec<u8>,
     pub created_at: DateTime,
     pub tx: String,
+    pub instruction: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveColumn)]
@@ -37,6 +38,7 @@ pub enum Column {
     Hash,
     CreatedAt,
     Tx,
+    Instruction,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DerivePrimaryKey)]
@@ -67,6 +69,7 @@ impl ColumnTrait for Column {
             Self::Hash => ColumnType::Binary.def(),
             Self::CreatedAt => ColumnType::DateTime.def(),
             Self::Tx => ColumnType::String(None).def(),
+            Self::Instruction => ColumnType::String(None).def(),
         }
     }
 }
@@ -81,7 +84,7 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<crate::dao::cl_items::ActiveModel> for ActiveModel {
     fn from(item: crate::dao::cl_items::ActiveModel) -> Self {
-        ActiveModel {
+        return ActiveModel {
             tree: item.tree,
             level: item.level,
             node_idx: item.node_idx,
@@ -89,6 +92,6 @@ impl From<crate::dao::cl_items::ActiveModel> for ActiveModel {
             seq: item.seq,
             leaf_idx: item.leaf_idx,
             ..Default::default()
-        }
+        };
     }
 }

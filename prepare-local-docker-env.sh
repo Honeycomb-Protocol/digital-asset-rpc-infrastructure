@@ -26,23 +26,22 @@ EXTERNAL_SO=("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s.so" \
 "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb.so" \
 )
 
-if [ -z ${RPC+x} ]; then
-    RPC="https://api.devnet.solana.com"
-fi
+mkdir solana_program_library || true
+curl -LkSs https://api.github.com/repos/solana-labs/solana-program-library/tarball/token-swap-js-v0.4.0 | tar -xz --strip-components=1 -C ./solana_program_library
+tar -zxf -C /solana_program_library solana-program-library.tar.gz
+pushd solana_program_library/account-compression/programs/account-compression
+  cargo build-bpf --bpf-out-dir ./here
+  mv ./here/spl_account_compression.so $CWD/programs/cmtDvXumGCrqC1Age74AVPhSRVXJMd8PJS91L8KbNCK.so
+popd
 
 if [ -z "$OUTPUT" ]; then
     OUTPUT=$CURRENT_DIR/programs
 fi
 
-# creates the output directory if it doesn't exist
-if [ ! -d ${OUTPUT} ]; then
-    mkdir ${OUTPUT}
-fi
-
-# only prints this if we have external programs
-if [ ${#EXTERNAL_ID[@]} -gt 0 ]; then
-    echo "Dumping external programs to: '${OUTPUT}'"
-fi
+pushd solana_program_library/associated-token-account/program
+  cargo build-bpf --bpf-out-dir ./here
+  mv ./here/spl_associated_token_account.so $CWD/programs/ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL.so
+popd
 
 # dump external programs binaries if needed
 for i in ${!EXTERNAL_ID[@]}; do
@@ -59,13 +58,5 @@ for i in ${!EXTERNAL_ID[@]}; do
             echo "$(GRN "[ SKIPPED ]") on-chain and local binaries are the same for '${EXTERNAL_SO[$i]}'"
         fi
 
-        rm ${OUTPUT}/onchain-${EXTERNAL_SO[$i]}
-    fi
-done
-
-# only prints this if we have external programs
-if [ ${#EXTERNAL_ID[@]} -gt 0 ]; then
-    echo ""
-fi
-
-cd ${CURRENT_DIR}
+rm -rf solana_program_library
+rm -rf metaplex_program_library

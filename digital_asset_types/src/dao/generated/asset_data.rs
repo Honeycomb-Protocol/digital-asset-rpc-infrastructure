@@ -26,7 +26,6 @@ pub struct Model {
     pub reindex: Option<bool>,
     pub raw_name: Option<Vec<u8>>,
     pub raw_symbol: Option<Vec<u8>>,
-    pub base_info_seq: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveColumn)]

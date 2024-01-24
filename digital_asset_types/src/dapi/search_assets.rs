@@ -1,6 +1,10 @@
 use super::common::{build_asset_response, create_pagination, create_sorting};
 use crate::{
-    dao::{scopes, PageOptions, SearchAssetsQuery},
+    dao::{
+        scopes::{self, asset::add_collection_metadata},
+        PageOptions, SearchAssetsQuery,
+    },
+    feature_flag::FeatureFlags,
     rpc::{filter::AssetSorting, options::Options, response::AssetList},
 };
 use sea_orm::{DatabaseConnection, DbErr};
@@ -10,12 +14,17 @@ pub async fn search_assets(
     search_assets_query: SearchAssetsQuery,
     sorting: AssetSorting,
     page_options: &PageOptions,
+    feature_flags: &FeatureFlags,
     options: &Options,
 ) -> Result<AssetList, DbErr> {
-    let pagination = create_pagination(page_options)?;
+    let pagination = create_pagination(&page_options)?;
     let (sort_direction, sort_column) = create_sorting(sorting);
     let (condition, joins) = search_assets_query.conditions()?;
-    let assets = scopes::asset::get_assets_by_condition(
+
+    let enable_grand_total_query =
+        feature_flags.enable_grand_total_query && options.show_grand_total;
+
+    let (assets, grand_total) = scopes::asset::get_assets_by_condition(
         db,
         condition,
         joins,
@@ -23,13 +32,19 @@ pub async fn search_assets(
         sort_direction,
         &pagination,
         page_options.limit,
+        enable_grand_total_query,
         options.show_unverified_collections,
     )
     .await?;
-    Ok(build_asset_response(
+    let mut asset_list = build_asset_response(
         assets,
         page_options.limit,
+        grand_total,
         &pagination,
         options,
-    ))
+    );
+    if options.show_collection_metadata {
+        add_collection_metadata(db, &mut asset_list.items).await?;
+    }
+    Ok(asset_list)
 }

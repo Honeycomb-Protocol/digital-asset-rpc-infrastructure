@@ -6,7 +6,9 @@ use crate::{
 use cadence_macros::{is_global_default_set, statsd_count, statsd_time};
 use chrono::Utc;
 use log::{debug, error};
-use plerkle_messenger::{ConsumptionType, Messenger, MessengerConfig, RecvData};
+use plerkle_messenger::{
+    ConsumptionType, Messenger, MessengerConfig, RecvData, TRANSACTION_STREAM,
+};
 use plerkle_serialization::root_as_transaction_info;
 
 use sqlx::{Pool, Postgres};
@@ -89,7 +91,7 @@ async fn handle_transaction(
             statsd_time!(
                 "ingester.bus_ingest_time",
                 (seen_at.timestamp_millis() - tx.seen_at()) as u64,
-                "stream" => stream_key
+                "stream" => TRANSACTION_STREAM
             );
         }
 
@@ -97,7 +99,7 @@ async fn handle_transaction(
         let res = manager.handle_transaction(&tx).await;
         let should_ack = capture_result(
             id.clone(),
-            stream_key,
+            TRANSACTION_STREAM,
             ("txn", "txn"),
             item.tries,
             res,

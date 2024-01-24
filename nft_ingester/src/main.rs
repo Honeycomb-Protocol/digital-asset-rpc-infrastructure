@@ -14,7 +14,7 @@ use crate::{
     account_updates::account_worker,
     ack::ack_worker,
     backfiller::setup_backfiller,
-    config::{init_logger, rand_string, setup_config, IngesterRole, WorkerType},
+    config::{init_logger, rand_string, setup_config, IngesterRole},
     database::setup_database,
     error::IngesterError,
     metrics::setup_metrics,
@@ -26,7 +26,9 @@ use cadence_macros::{is_global_default_set, statsd_count};
 use chrono::Duration;
 use clap::{arg, command, value_parser};
 use log::{error, info};
-use plerkle_messenger::{redis_messenger::RedisMessenger, ConsumptionType};
+use plerkle_messenger::{
+    redis_messenger::RedisMessenger, ConsumptionType, ACCOUNT_STREAM, TRANSACTION_STREAM,
+};
 use std::{path::PathBuf, time};
 use tokio::{signal, task::JoinSet};
 
@@ -67,16 +69,13 @@ pub async fn main() -> Result<(), IngesterError> {
 
     info!("Starting Program with Role {}", role);
     // Tasks Setup -----------------------------------------------
-    // This joinset maages all the tasks that are spawned.
+    // This joinSet manages all the tasks that are spawned.
     let mut tasks = JoinSet::new();
     let stream_metrics_timer = Duration::seconds(30).to_std().unwrap();
 
     // BACKGROUND TASKS --------------------------------------------
     //Setup definitions for background tasks
-    let task_runner_config = config
-        .background_task_runner_config
-        .clone()
-        .unwrap_or_default();
+    let task_runner_config = config.bg_task_config.clone().unwrap_or_default();
     let bg_task_definitions: Vec<Box<dyn BgTask>> = vec![Box::new(DownloadMetadataTask {
         lock_duration: task_runner_config.lock_duration,
         max_attempts: task_runner_config.max_attempts,
@@ -85,8 +84,12 @@ pub async fn main() -> Result<(), IngesterError> {
         )),
     })];
 
-    let mut background_task_manager =
-        TaskManager::new(rand_string(), database_pool.clone(), bg_task_definitions);
+    let mut background_task_manager = TaskManager::new(
+        rand_string(),
+        database_pool.clone(),
+        bg_task_definitions,
+        config.ipfs_gateway.clone(),
+    );
     // This is how we send new bg tasks
     let bg_task_listener = background_task_manager
         .start_listener(role == IngesterRole::BackgroundTaskRunner || role == IngesterRole::All);
@@ -98,62 +101,44 @@ pub async fn main() -> Result<(), IngesterError> {
 
     // Stream Consumers Setup -------------------------------------
     if role == IngesterRole::Ingester || role == IngesterRole::All {
-        let workers = config.get_worker_config().clone();
-
         let (_ack_task, ack_sender) =
             ack_worker::<RedisMessenger>(config.get_messneger_client_config());
 
-        // iterate all the workers
-        for worker in workers {
-            let stream_name = Box::leak(Box::new(worker.stream_name.to_owned()));
-
-            let mut timer_worker = StreamSizeTimer::new(
-                stream_metrics_timer,
-                config.messenger_config.clone(),
-                stream_name.as_str(),
-            )?;
-
-            if let Some(t) = timer_worker.start::<RedisMessenger>().await {
-                tasks.spawn(t);
-            }
-
-            for i in 0..worker.worker_count {
-                if worker.worker_type == WorkerType::Account {
-                    let _account = account_worker::<RedisMessenger>(
-                        database_pool.clone(),
-                        config.get_messneger_client_config(),
-                        bg_task_sender.clone(),
-                        ack_sender.clone(),
-                        if i == 0 {
-                            ConsumptionType::Redeliver
-                        } else {
-                            ConsumptionType::New
-                        },
-                        stream_name,
-                    );
-                } else if worker.worker_type == WorkerType::Transaction {
-                    let _txn = transaction_worker::<RedisMessenger>(
-                        database_pool.clone(),
-                        config.get_messneger_client_config(),
-                        bg_task_sender.clone(),
-                        ack_sender.clone(),
-                        if i == 0 {
-                            ConsumptionType::Redeliver
-                        } else {
-                            ConsumptionType::New
-                        },
-                        config.cl_audits.unwrap_or(false),
-                        stream_name,
-                    );
-                }
-            }
+        for i in 0..config.get_account_stream_worker_count() {
+            let _account = account_worker::<RedisMessenger>(
+                database_pool.clone(),
+                config.get_messneger_client_config(),
+                bg_task_sender.clone(),
+                ack_sender.clone(),
+                if i == 0 {
+                    ConsumptionType::Redeliver
+                } else {
+                    ConsumptionType::New
+                },
+                ACCOUNT_STREAM,
+            );
+        }
+        for i in 0..config.get_transaction_stream_worker_count() {
+            let _txn = transaction_worker::<RedisMessenger>(
+                database_pool.clone(),
+                config.get_messneger_client_config(),
+                bg_task_sender.clone(),
+                ack_sender.clone(),
+                if i == 0 {
+                    ConsumptionType::Redeliver
+                } else {
+                    ConsumptionType::New
+                },
+                config.cl_audits.unwrap_or(false),
+                TRANSACTION_STREAM,
+            );
         }
     }
     // Stream Size Timers ----------------------------------------
     // Setup Stream Size Timers, these are small processes that run every 60 seconds and farm metrics for the size of the streams.
     // If metrics are disabled, these will not run.
     if role == IngesterRole::BackgroundTaskRunner || role == IngesterRole::All {
-        let background_runner_config = config.clone().background_task_runner_config;
+        let background_runner_config = config.clone().bg_task_config;
         tasks.spawn(background_task_manager.start_runner(background_runner_config));
     }
     // Backfiller Setup ------------------------------------------

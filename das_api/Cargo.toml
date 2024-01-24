@@ -13,7 +13,7 @@ bs58 = { workspace = true }
 cadence = { workspace = true }
 cadence-macros = { workspace = true }
 digital_asset_types = { workspace = true, features = ["json_types", "sql_types"] }
-env_logger  = { workspace = true }
+env_logger = { workspace = true }
 figment = { workspace = true, features = ["env"] }
 hyper = { workspace = true }
 jsonrpsee = { workspace = true, features = ["server", "macros"]}

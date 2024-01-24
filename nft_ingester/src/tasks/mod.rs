@@ -1,6 +1,6 @@
 use crate::{error::IngesterError, metric};
 use async_trait::async_trait;
-use cadence_macros::{is_global_default_set, statsd_count, statsd_histogram};
+use cadence_macros::{is_global_default_set, statsd_count, statsd_gauge, statsd_histogram};
 use chrono::{Duration, NaiveDateTime, Utc};
 use crypto::{digest::Digest, sha2::Sha256};
 use digital_asset_types::dao::{sea_orm_active_enums::TaskStatus, tasks};
@@ -30,19 +30,18 @@ pub trait BgTask: Send + Sync {
         &self,
         db: &DatabaseConnection,
         data: serde_json::Value,
+        ipfs_gateway: Option<String>,
     ) -> Result<(), IngesterError>;
 }
 
-pub const RETRY_INTERVAL: u64 = 1000;
-pub const DELETE_INTERVAL: u64 = 30000;
-pub const MAX_TASK_BATCH_SIZE: u64 = 100;
-pub const PURGE_TIME: u64 = 3600;
+const RETRY_INTERVAL: u64 = 1000;
+const QUEUE_DEPTH_INTERVAL: u64 = 2500;
+const DELETE_INTERVAL: u64 = 30000;
+const MAX_TASK_BATCH_SIZE: u64 = 100;
+const PURGE_TIME: u64 = 3600;
 
-/**
- * Configuration for the background task runner, to be used in config file loading e.g.
- */
 #[derive(Deserialize, PartialEq, Debug, Clone)]
-pub struct BackgroundTaskRunnerConfig {
+pub struct BgTaskConfig {
     pub delete_interval: Option<u64>,
     pub retry_interval: Option<u64>,
     pub purge_time: Option<u64>,
@@ -52,9 +51,9 @@ pub struct BackgroundTaskRunnerConfig {
     pub timeout: Option<u64>,
 }
 
-impl Default for BackgroundTaskRunnerConfig {
+impl Default for BgTaskConfig {
     fn default() -> Self {
-        BackgroundTaskRunnerConfig {
+        BgTaskConfig {
             delete_interval: Some(DELETE_INTERVAL),
             retry_interval: Some(RETRY_INTERVAL),
             purge_time: Some(PURGE_TIME),
@@ -99,6 +98,7 @@ pub struct TaskManager {
     pool: Pool<Postgres>,
     producer: Option<UnboundedSender<TaskData>>,
     registered_task_types: Arc<HashMap<String, Box<dyn BgTask>>>,
+    ipfs_gateway: Option<String>,
 }
 
 impl TaskManager {
@@ -107,6 +107,7 @@ impl TaskManager {
         db: &DatabaseConnection,
         task_def: &Box<dyn BgTask>,
         mut task: tasks::ActiveModel,
+        ipfs_gateway: Option<String>,
     ) -> Result<tasks::ActiveModel, IngesterError> {
         let task_name = task_def.name();
         let attempts: Option<Value> = task.attempts.into_value();
@@ -124,7 +125,7 @@ impl TaskManager {
         }?;
 
         let start = Utc::now();
-        let res = task_def.task(db, *data_json).await;
+        let res = task_def.task(&db, *data_json, ipfs_gateway).await;
         let end = Utc::now();
         task.duration = Set(Some(
             ((end.timestamp_millis() - start.timestamp_millis()) / 1000) as i32,
@@ -209,13 +210,21 @@ impl TaskManager {
                     )
                     .add(
                         Expr::col(tasks::Column::Attempts)
-                            .less_or_equal(Expr::col(tasks::Column::MaxAttempts)),
+                            .less_than(Expr::col(tasks::Column::MaxAttempts)),
                     ),
             )
             .order_by(tasks::Column::Attempts, Order::Asc)
             .order_by(tasks::Column::CreatedAt, Order::Desc)
             .limit(batch_size)
             .all(conn)
+            .await
+            .map_err(|e| e.into())
+    }
+
+    pub async fn get_task_queue_depth(conn: &DatabaseConnection) -> Result<u64, IngesterError> {
+        tasks::Entity::find()
+            .filter(tasks::Column::Status.eq(TaskStatus::Pending))
+            .count(conn)
             .await
             .map_err(|e| e.into())
     }
@@ -236,6 +245,7 @@ impl TaskManager {
         instance_name: String,
         pool: Pool<Postgres>,
         task_defs: Vec<Box<dyn BgTask>>,
+        ipfs_gateway: Option<String>,
     ) -> Self {
         let mut tasks = HashMap::new();
         for task in task_defs {
@@ -246,6 +256,7 @@ impl TaskManager {
             pool,
             producer: None,
             registered_task_types: Arc::new(tasks),
+            ipfs_gateway,
         }
     }
 
@@ -359,39 +370,35 @@ impl TaskManager {
         })
     }
 
-    pub fn start_runner(&self, config: Option<BackgroundTaskRunnerConfig>) -> JoinHandle<()> {
-        let task_map = Arc::clone(&self.registered_task_types);
-        let instance_name = self.instance_name.clone();
-
-        // Load the config values
-        // For backwards compatibility reasons, the logic is a bit convoluted.
+    pub fn start_runner(&self, config: Option<BgTaskConfig>) -> JoinHandle<()> {
         let config = config.unwrap_or_default();
 
         let delete_interval = tokio::time::Duration::from_millis(
-            config.delete_interval.unwrap_or(
-                BackgroundTaskRunnerConfig::default()
-                    .delete_interval
-                    .unwrap(),
-            ),
+            config
+                .delete_interval
+                .unwrap_or(BgTaskConfig::default().delete_interval.unwrap()),
         );
 
         let retry_interval = tokio::time::Duration::from_millis(
-            config.retry_interval.unwrap_or(
-                BackgroundTaskRunnerConfig::default()
-                    .retry_interval
-                    .unwrap(),
-            ),
+            config
+                .retry_interval
+                .unwrap_or(BgTaskConfig::default().retry_interval.unwrap()),
         );
 
         let purge_time = tokio::time::Duration::from_secs(
             config
                 .purge_time
-                .unwrap_or(BackgroundTaskRunnerConfig::default().purge_time.unwrap()),
+                .unwrap_or(BgTaskConfig::default().purge_time.unwrap()),
         );
 
         let batch_size = config
             .batch_size
-            .unwrap_or(BackgroundTaskRunnerConfig::default().batch_size.unwrap());
+            .unwrap_or(BgTaskConfig::default().batch_size.unwrap());
+
+        info!(
+            "Background runner config: delete_interval: {:?}, retry_interval: {:?}, purge_time: {:?}, batch_size:{:?}",
+            delete_interval, retry_interval, purge_time, batch_size
+        );
 
         let pool = self.pool.clone();
         tokio::spawn(async move {
@@ -417,8 +424,32 @@ impl TaskManager {
             }
         });
 
-        // Loop to check for tasks that need to be executed and execute them
         let pool = self.pool.clone();
+        tokio::spawn(async move {
+            let conn = SqlxPostgresConnector::from_sqlx_postgres_pool(pool);
+            let mut interval =
+                time::interval(tokio::time::Duration::from_millis(QUEUE_DEPTH_INTERVAL));
+            loop {
+                interval.tick().await; // ticks immediately
+                let res = TaskManager::get_task_queue_depth(&conn).await;
+                match res {
+                    Ok(depth) => {
+                        debug!("Task queue depth: {}", depth);
+                        metric! {
+                            statsd_gauge!("ingester.bgtask.queue_depth", depth);
+                        }
+                    }
+                    Err(e) => {
+                        error!("error getting queue depth: {}", e);
+                    }
+                };
+            }
+        });
+
+        let pool = self.pool.clone();
+        let ipfs_gateway = self.ipfs_gateway.clone();
+        let task_map = self.registered_task_types.clone();
+        let instance_name = self.instance_name.clone();
         tokio::spawn(async move {
             let mut interval = time::interval(retry_interval);
             let conn = SqlxPostgresConnector::from_sqlx_postgres_pool(pool.clone());
@@ -432,6 +463,7 @@ impl TaskManager {
                             let task_map = Arc::clone(&task_map);
                             let instance_name = instance_name.clone();
                             let pool = pool.clone();
+                            let ipfs_gateway = ipfs_gateway.clone();
                             tokio::task::spawn(async move {
                                 if let Some(task_executor) = task_map.get(&*task.task_type) {
                                     let conn = SqlxPostgresConnector::from_sqlx_postgres_pool(pool);
@@ -448,6 +480,7 @@ impl TaskManager {
                                         &conn,
                                         task_executor,
                                         active_model,
+                                        ipfs_gateway,
                                     )
                                     .await?;
                                     TaskManager::save_task(&conn, model).await?;

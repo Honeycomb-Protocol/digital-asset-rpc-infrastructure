@@ -5,5 +5,14 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Options {
     #[serde(default)]
+    pub show_collection_metadata: bool,
+    #[serde(default)]
+    pub show_raw_data: bool,
+    #[serde(default)]
     pub show_unverified_collections: bool,
+    #[serde(default)]
+    pub show_grand_total: bool,
+
+    #[serde(skip)]
+    pub cdn_prefix: Option<String>,
 }

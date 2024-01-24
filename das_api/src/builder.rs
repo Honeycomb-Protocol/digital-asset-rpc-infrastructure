@@ -13,15 +13,6 @@ impl RpcApiBuilder {
             rpc_context.check_health().await.map_err(Into::into)
         })?;
 
-        module.register_async_method("get_asset_proof", |rpc_params, rpc_context| async move {
-            let payload = rpc_params.parse::<GetAssetProof>()?;
-            rpc_context
-                .get_asset_proof(payload)
-                .await
-                .map_err(Into::into)
-        })?;
-        module.register_alias("getAssetProof", "get_asset_proof")?;
-
         module.register_async_method("get_proof", |rpc_params, rpc_context| async move {
             let payload = rpc_params.parse::<LeafTreePayload>()?;
             rpc_context.get_proof(payload).await.map_err(Into::into)
@@ -60,6 +51,15 @@ impl RpcApiBuilder {
                 .map_err(Into::into)
         })?;
         module.register_alias("getCharacters", "get_characters")?;
+
+        module.register_async_method("get_asset_proof", |rpc_params, rpc_context| async move {
+            let payload = rpc_params.parse::<GetAssetProof>()?;
+            rpc_context
+                .get_asset_proof(payload)
+                .await
+                .map_err(Into::into)
+        })?;
+        module.register_alias("getAssetProof", "get_asset_proof")?;
 
         module.register_async_method("get_asset_proofs", |rpc_params, rpc_context| async move {
             let payload = rpc_params.parse::<GetAssetProofs>()?;
@@ -131,6 +131,18 @@ impl RpcApiBuilder {
                     .map_err(Into::into)
             },
         )?;
+
+        module.register_async_method(
+            "getSignaturesForAsset",
+            |rpc_params, rpc_context| async move {
+                let payload = rpc_params.parse::<GetSignaturesForAsset>()?;
+                rpc_context
+                    .get_signatures_for_asset(payload)
+                    .await
+                    .map_err(Into::into)
+            },
+        )?;
+
         module.register_alias("getAssetsByGroup", "get_assets_by_group")?;
 
         module.register_async_method("search_assets", |rpc_params, rpc_context| async move {

@@ -7,10 +7,12 @@ use digital_asset_types::{
         Cursor, PageOptions, SearchAssetsQuery,
     },
     dapi::{
-        get_asset, get_asset_proofs, get_assets, get_assets_by_authority, get_assets_by_creator,
-        get_assets_by_group, get_assets_by_owner, get_characters, get_compressed_accounts,
-        get_compressed_data, get_proof, get_proof_for_asset, search_assets,
+        get_asset, get_asset_batch, get_asset_proof_batch, get_assets_by_authority,
+        get_assets_by_creator, get_assets_by_group, get_assets_by_owner, get_characters,
+        get_compressed_accounts, get_compressed_data, get_proof, get_proof_for_asset,
+        get_signatures_for_asset, search_assets,
     },
+    feature_flag::FeatureFlags,
     rpc::{
         filter::{AssetSortBy, SearchConditionType},
         response::GetGroupingResponse,
@@ -20,7 +22,10 @@ use digital_asset_types::{
 use open_rpc_derive::document_rpc;
 use sea_orm::{sea_query::ConditionType, ConnectionTrait, DbBackend, Statement};
 
-use crate::validation::{validate_opt_pubkey, validate_search_with_name};
+use crate::{
+    feature_flag::get_feature_flags,
+    validation::{validate_opt_pubkey, validate_search_with_name},
+};
 use open_rpc_schema::document::OpenrpcDocument;
 use {
     crate::api::*,
@@ -28,13 +33,17 @@ use {
     crate::validation::validate_pubkey,
     crate::DasApiError,
     async_trait::async_trait,
-    digital_asset_types::rpc::{response::AssetList, Asset, AssetProof, CompressedData},
+    digital_asset_types::rpc::{
+        response::AssetList, response::TransactionSignatureList, Asset, AssetProof, CompressedData,
+    },
     sea_orm::{DatabaseConnection, DbErr, SqlxPostgresConnector},
     sqlx::postgres::PgPoolOptions,
 };
 
 pub struct DasApi {
     db_connection: DatabaseConnection,
+    cdn_prefix: Option<String>,
+    feature_flags: FeatureFlags,
 }
 
 impl DasApi {
@@ -43,10 +52,12 @@ impl DasApi {
             .max_connections(250)
             .connect(&config.database_url)
             .await?;
-
+        let feature_flags = get_feature_flags(&config);
         let conn = SqlxPostgresConnector::from_sqlx_postgres_pool(pool);
         Ok(DasApi {
             db_connection: conn,
+            cdn_prefix: config.cdn_prefix,
+            feature_flags,
         })
     }
 
@@ -72,7 +83,7 @@ impl DasApi {
         before: &Option<String>,
         after: &Option<String>,
         cursor: &Option<String>,
-        sorting: Option<AssetSorting>,
+        sorting: &Option<&AssetSorting>,
     ) -> Result<PageOptions, DasApiError> {
         let mut is_cursor_enabled = true;
         let mut page_opt = PageOptions::default();
@@ -94,6 +105,11 @@ impl DasApi {
                 return Err(DasApiError::PaginationError);
             }
 
+            let current_limit = limit.unwrap_or(1000);
+            let offset = (page - 1) * current_limit;
+            if offset > 500_000 {
+                return Err(DasApiError::OffsetLimitExceededError);
+            }
             is_cursor_enabled = false;
         }
 
@@ -129,7 +145,7 @@ impl DasApi {
                 if sort.sort_by != AssetSortBy::Id {
                     return Err(DasApiError::PaginationSortingValidationError);
                 }
-                page_opt.cursor = Some(self.get_cursor(cursor)?);
+                page_opt.cursor = Some(self.get_cursor(&cursor)?);
             }
         } else {
             page_opt.page = page.map(|x| x as u64);
@@ -141,6 +157,45 @@ impl DasApi {
                 .map(|x| bs58::decode(x).into_vec().unwrap_or_default());
         }
         Ok(page_opt)
+    }
+
+    fn validate_sorting_for_collection(
+        &self,
+        group: &String,
+        collection: &String,
+        sort_by: &Option<AssetSorting>,
+    ) -> Result<(), DasApiError> {
+        // List of collections which contain more than 300k nfts
+        let collections: [&str; 17] = [
+            "DRiP2Pn2K6fuMLKQmt5rZWyHiUZ6WK3GChEySUpHSS4x",
+            "DGPTxgKaBPJv3Ng7dc9AFDpX6E7kgUMZEgyTm3VGWPW6",
+            "VLT1ERWF2SQ51ybTGAuSBDWFZCxYth8ox6faJG9WrmG",
+            "8drYRaD7csLTEqX89hyM1XpTmXkQh4Evr1xQue2XkdB5",
+            "FLRxZJb7Kpd5i9Q7WdH7r5uRqDL7oJVpqW3ew8FpE336",
+            "DAA1jBEYj2w4DgMRDVaXg5CWfjmTry5t8VEvLJQ9R8PY",
+            "tinyVrmxcEUyVufgmFzGYe7C4mrGXDC21uLJAGVKXkg",
+            "BoRKkxKPoAt7LcyVRPa9ZZT5MztkJuc4PiGrUXAgDHPH",
+            "2bJpbZ5VNp48LpTh2DSwiuo6gJsTrh59TjcsAfRCLNXZ",
+            "BZ3DohF6BHGkAnZAe1g8ohWVuh95bXT4FhiGw1BXJWfF",
+            "MAQNiWAYh5yGCQKeWFzHLypThEjfTJfBQxwiF8P5Vax",
+            "AMSNskm2RZqPXCZ6P2z6JLyHWMQF6pQ8RA8Q6x42Xufq",
+            "F8FdDYD3PWndYoae9TrBcucXDWFwDvm6bZU2LQT1PwyB",
+            "DASHYFhWiCoe8PNCHZJAjmvGBBj8SLtkvW2uYV2e3FrV",
+            "BTDX3HWvRv16j4KUUbdegP3oazyVGCLxJpFqSQZ2bH6n",
+            "8tWwfmudVrrRzACvtt18H5vHVxsYofMyeGt7L3LFPSqC",
+            "WoMbiTtXKwUtf4wosoffv45khVF8yA2mPkinGosCFQ4",
+        ];
+
+        if group == "collection" && collections.contains(&collection.as_str()) {
+            if sort_by.clone().map(|s| s.sort_by) == Some(AssetSortBy::None) {
+                return Ok(());
+            } else {
+                return Err(DasApiError::ValidationError(
+                    format!("Sorting is not supported for collection {}. Please set 'sortBy' to 'none' to disable sorting.", collection),
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -161,17 +216,17 @@ impl ApiContract for DasApi {
         Ok(())
     }
 
-    async fn get_asset_proof(
-        self: &DasApi,
-        payload: GetAssetProof,
-    ) -> Result<AssetProof, DasApiError> {
-        let id = validate_pubkey(payload.id.clone())?;
-        let id_bytes = id.to_bytes().to_vec();
-        get_proof_for_asset(&self.db_connection, id_bytes)
+    async fn get_proof(self: &DasApi, payload: LeafTreePayload) -> Result<AssetProof, DasApiError> {
+        let tree = validate_pubkey(payload.tree.clone())?;
+        let tree_bytes = tree.to_bytes().to_vec();
+        get_proof(&self.db_connection, tree_bytes, payload.leaf_idx)
             .await
             .and_then(|p| {
                 if p.proof.is_empty() {
-                    return Err(not_found(&payload.id));
+                    return Err(not_found(&format!(
+                        "Tree {} Leaf {}",
+                        payload.tree, payload.leaf_idx
+                    )));
                 }
                 Ok(p)
             })
@@ -221,17 +276,17 @@ impl ApiContract for DasApi {
             .map_err(Into::into)
     }
 
-    async fn get_proof(self: &DasApi, payload: LeafTreePayload) -> Result<AssetProof, DasApiError> {
-        let tree = validate_pubkey(payload.tree.clone())?;
-        let tree_bytes = tree.to_bytes().to_vec();
-        get_proof(&self.db_connection, tree_bytes, payload.leaf_idx)
+    async fn get_asset_proof(
+        self: &DasApi,
+        payload: GetAssetProof,
+    ) -> Result<AssetProof, DasApiError> {
+        let id = validate_pubkey(payload.id.clone())?;
+        let id_bytes = id.to_bytes().to_vec();
+        get_proof_for_asset(&self.db_connection, id_bytes)
             .await
             .and_then(|p| {
                 if p.proof.is_empty() {
-                    return Err(not_found(&format!(
-                        "Tree {} Leaf {}",
-                        payload.tree, payload.leaf_idx
-                    )));
+                    return Err(not_found(&payload.id));
                 }
                 Ok(p)
             })
@@ -254,7 +309,7 @@ impl ApiContract for DasApi {
             .map(|id| validate_pubkey(id.clone()).map(|id| id.to_bytes().to_vec()))
             .collect::<Result<Vec<Vec<u8>>, _>>()?;
 
-        let proofs = get_asset_proofs(&self.db_connection, id_bytes).await?;
+        let proofs = get_asset_proof_batch(&self.db_connection, id_bytes).await?;
 
         let result: HashMap<String, Option<AssetProof>> = ids
             .iter()
@@ -266,10 +321,16 @@ impl ApiContract for DasApi {
     async fn get_asset(self: &DasApi, payload: GetAsset) -> Result<Asset, DasApiError> {
         let GetAsset { id, options } = payload;
         let id_bytes = validate_pubkey(id.clone())?.to_bytes().to_vec();
-        let options = options.unwrap_or_default();
-        get_asset(&self.db_connection, id_bytes, &options)
-            .await
-            .map_err(Into::into)
+        let mut options = options.unwrap_or_default();
+        options.cdn_prefix = self.cdn_prefix.clone();
+        get_asset(
+            &self.db_connection,
+            id_bytes,
+            &self.feature_flags,
+            &options.into(),
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn get_assets(
@@ -288,9 +349,16 @@ impl ApiContract for DasApi {
             .map(|id| validate_pubkey(id.clone()).map(|id| id.to_bytes().to_vec()))
             .collect::<Result<Vec<Vec<u8>>, _>>()?;
 
-        let options = options.unwrap_or_default();
+        let mut options = options.unwrap_or_default();
+        options.cdn_prefix = self.cdn_prefix.clone();
 
-        let assets = get_assets(&self.db_connection, id_bytes, batch_size as u64, &options).await?;
+        let assets = get_asset_batch(
+            &self.db_connection,
+            id_bytes,
+            batch_size as u64,
+            &options.into(),
+        )
+        .await?;
 
         let result: Vec<Option<Asset>> = ids.iter().map(|id| assets.get(id).cloned()).collect();
         Ok(result)
@@ -315,14 +383,16 @@ impl ApiContract for DasApi {
         let owner_address = validate_pubkey(owner_address.clone())?;
         let owner_address_bytes = owner_address.to_bytes().to_vec();
         let sort_by = sort_by.unwrap_or_default();
-        let options = options.unwrap_or_default();
         let page_options =
-            self.validate_pagination(limit, page, &before, &after, &cursor, Some(sort_by))?;
+            self.validate_pagination(limit, page, &before, &after, &cursor, &Some(&sort_by))?;
+        let mut options = options.unwrap_or_default();
+        options.cdn_prefix = self.cdn_prefix.clone();
         get_assets_by_owner(
             &self.db_connection,
             owner_address_bytes,
             sort_by,
             &page_options,
+            &self.feature_flags,
             &options,
         )
         .await
@@ -344,18 +414,20 @@ impl ApiContract for DasApi {
             options,
             cursor,
         } = payload;
+        self.validate_sorting_for_collection(&group_key, &group_value, &sort_by)?;
         let before: Option<String> = before.filter(|before| !before.is_empty());
         let after: Option<String> = after.filter(|after| !after.is_empty());
         let sort_by = sort_by.unwrap_or_default();
-        let options = options.unwrap_or_default();
         let page_options =
-            self.validate_pagination(limit, page, &before, &after, &cursor, Some(sort_by))?;
+            self.validate_pagination(limit, page, &before, &after, &cursor, &Some(&sort_by))?;
+        let mut options = options.unwrap_or_default();
+        options.cdn_prefix = self.cdn_prefix.clone();
         get_assets_by_group(
             &self.db_connection,
-            group_key,
             group_value,
             sort_by,
             &page_options,
+            &self.feature_flags,
             &options,
         )
         .await
@@ -382,15 +454,17 @@ impl ApiContract for DasApi {
 
         let sort_by = sort_by.unwrap_or_default();
         let page_options =
-            self.validate_pagination(limit, page, &before, &after, &cursor, Some(sort_by))?;
+            self.validate_pagination(limit, page, &before, &after, &cursor, &Some(&sort_by))?;
         let only_verified = only_verified.unwrap_or_default();
-        let options = options.unwrap_or_default();
+        let mut options = options.unwrap_or_default();
+        options.cdn_prefix = self.cdn_prefix.clone();
         get_assets_by_creator(
             &self.db_connection,
             creator_address_bytes,
             only_verified,
             sort_by,
             &page_options,
+            &self.feature_flags,
             &options,
         )
         .await
@@ -411,18 +485,19 @@ impl ApiContract for DasApi {
             options,
             cursor,
         } = payload;
-        let sort_by = sort_by.unwrap_or_default();
         let authority_address = validate_pubkey(authority_address.clone())?;
         let authority_address_bytes = authority_address.to_bytes().to_vec();
-        let options = options.unwrap_or_default();
-
+        let sort_by = sort_by.unwrap_or_default();
         let page_options =
-            self.validate_pagination(limit, page, &before, &after, &cursor, Some(sort_by))?;
+            self.validate_pagination(limit, page, &before, &after, &cursor, &Some(&sort_by))?;
+        let mut options = options.unwrap_or_default();
+        options.cdn_prefix = self.cdn_prefix.clone();
         get_assets_by_authority(
             &self.db_connection,
             authority_address_bytes,
             sort_by,
             &page_options,
+            &self.feature_flags,
             &options,
         )
         .await
@@ -512,14 +587,22 @@ impl ApiContract for DasApi {
             json_uri,
             name,
         };
-        let options = options.unwrap_or_default();
+        let mut options = options.unwrap_or_default();
         let sort_by = sort_by.unwrap_or_default();
         let page_options =
-            self.validate_pagination(limit, page, &before, &after, &cursor, Some(sort_by))?;
+            self.validate_pagination(limit, page, &before, &after, &cursor, &Some(&sort_by))?;
+        options.cdn_prefix = self.cdn_prefix.clone();
         // Execute query
-        search_assets(&self.db_connection, saq, sort_by, &page_options, &options)
-            .await
-            .map_err(Into::into)
+        search_assets(
+            &self.db_connection,
+            saq,
+            sort_by,
+            &page_options,
+            &self.feature_flags,
+            &options,
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn get_grouping(
@@ -536,5 +619,38 @@ impl ApiContract for DasApi {
             group_name: group_value,
             group_size: gs.size,
         })
+    }
+
+    async fn get_signatures_for_asset(
+        self: &DasApi,
+        payload: GetSignaturesForAsset,
+    ) -> Result<TransactionSignatureList, DasApiError> {
+        let GetSignaturesForAsset {
+            id,
+            limit,
+            page,
+            before,
+            after,
+            tree,
+            leaf_index,
+            cursor,
+        } = payload;
+
+        if !((id.is_some() && tree.is_none() && leaf_index.is_none())
+            || (id.is_none() && tree.is_some() && leaf_index.is_some()))
+        {
+            return Err(DasApiError::ValidationError(
+                "Must provide either 'id' or both 'tree' and 'leafIndex'".to_string(),
+            ));
+        }
+        let id = validate_opt_pubkey(&id)?;
+        let tree = validate_opt_pubkey(&tree)?;
+
+        let page_options =
+            self.validate_pagination(limit, page, &before, &after, &cursor, &None)?;
+
+        get_signatures_for_asset(&self.db_connection, id, tree, leaf_index, page_options)
+            .await
+            .map_err(Into::into)
     }
 }

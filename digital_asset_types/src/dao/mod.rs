@@ -2,18 +2,21 @@
 mod full_asset;
 mod generated;
 pub mod scopes;
+pub use full_asset::*;
+#[allow(ambiguous_glob_reexports)]
+pub use generated::*;
+use serde::{Deserialize, Serialize};
+
 use self::sea_orm_active_enums::{
     OwnerType, RoyaltyTargetType, SpecificationAssetClass, SpecificationVersions,
 };
-pub use full_asset::*;
-pub use generated::*;
+
 use sea_orm::{
     entity::*,
     sea_query::Expr,
     sea_query::{ConditionType, IntoCondition, SimpleExpr},
     Condition, DbErr, RelationDef,
 };
-use serde::{Deserialize, Serialize};
 
 pub struct GroupingSize {
     pub size: u64,
@@ -271,7 +274,7 @@ impl SearchAssetsQuery {
             })?;
 
             let name_expr =
-                SimpleExpr::Custom(format!("chain_data->>'name' LIKE '%{}%'", name_as_str));
+                SimpleExpr::Custom(format!("chain_data->>'name' LIKE '%{}%'", name_as_str).into());
 
             conditions = conditions.add(name_expr);
             let rel = asset_data::Relation::Asset

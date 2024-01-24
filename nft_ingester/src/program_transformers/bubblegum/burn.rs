@@ -17,13 +17,13 @@ pub async fn burn<'c, T>(
     parsing_result: &BubblegumInstruction,
     bundle: &InstructionBundle<'c>,
     txn: &'c T,
-    cl_audits: bool,
+    instruction: &str,
 ) -> Result<(), IngesterError>
 where
     T: ConnectionTrait + TransactionTrait,
 {
     if let Some(cl) = &parsing_result.tree_update {
-        let seq = save_changelog_event(cl, bundle.slot, bundle.txn_id, txn, cl_audits).await?;
+        let seq = save_changelog_event(cl, bundle.slot, bundle.txn_id, txn, instruction).await?;
         let leaf_index = cl.index;
         let (asset_id, _) = Pubkey::find_program_address(
             &[
@@ -35,7 +35,6 @@ where
         );
         debug!("Indexing burn for asset id: {:?}", asset_id);
         let id_bytes = asset_id.to_bytes();
-
         let asset_model = asset::ActiveModel {
             id: Set(id_bytes.to_vec()),
             burnt: Set(true),
