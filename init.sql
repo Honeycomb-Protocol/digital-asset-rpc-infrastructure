@@ -208,12 +208,12 @@ create table asset
     -- visibility
     created_at                timestamp with time zone           default (now() at time zone 'utc'),
     burnt                     bool                      not null default false,
-    slot_updated              bigint                    not null,
-    data_hash                 varchar(64)               not null,
-    creator_hash              varchar(64)               not null,
-    owner_delegate_seq        int                       not null default 0,
-    leaf_seq                  int                       not null default 0,
-    base_info_seq             int                       not null default 0,
+    slot_updated              bigint                    not null
+    -- data_hash                 varchar(64)               not null,
+    -- creator_hash              varchar(64)               not null,
+    -- owner_delegate_seq        int                       not null default 0,
+    -- leaf_seq                  int                       not null default 0,
+    -- base_info_seq             int                       not null default 0
 );
 -- @@@@@@
 
@@ -316,6 +316,8 @@ create table merkle_tree
 
 create index merkle_tree_id on merkle_tree (id);
 -- @@@@@@
+create index merkle_tree_program on merkle_tree (program);
+-- @@@@@@
 
 create table compressed_data
 (
@@ -347,6 +349,4 @@ create index compressed_data_parsed_data on compressed_data (parsed_data);
 create unique index compressed_data_tree_leaf_idx on compressed_data (tree_id, leaf_idx);
 -- @@@@@@
 create index compressed_data_revision on compressed_data (tree_id, raw_data, leaf_idx);
--- @@@@@@
-create index compressed_data_program on compressed_data (program);
 -- @@@@@@
