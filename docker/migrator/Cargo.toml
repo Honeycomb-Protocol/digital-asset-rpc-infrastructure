@@ -16,7 +16,7 @@ async-std = "1.0.0"
 async-trait = "0.1.60"
 borsh = "~0.10.3"
 borsh-derive = "~0.10.3"
-blockbuster = { version = "0.9.0-beta.5", git = "https://github.com/Honeycomb-Protocol/blockbuster.git", branch = "beta" }
+blockbuster = { version = "0.9.0-beta.9", git = "https://github.com/Honeycomb-Protocol/blockbuster.git", branch = "beta" }
 bs58 = "0.4.0"
 digital_asset_types = { path = "digital_asset_types" }
 enum-iterator = "1.2.0"

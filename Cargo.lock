@@ -1007,8 +1007,8 @@ checksum = "8d696c370c750c948ada61c69a0ee2cbbb9c50b1019ddb86d9317157a99c2cae"
 
 [[package]]
 name = "blockbuster"
-version = "0.9.0-beta.5"
-source = "git+https://github.com/Honeycomb-Protocol/blockbuster.git?branch=beta#958f71223132aad39ebc1e9b27247098f7954104"
+version = "0.9.0-beta.9"
+source = "git+https://github.com/Honeycomb-Protocol/blockbuster.git?branch=beta#55fb5c7e7ff2d22059e9074bb842859a0d06b562"
 dependencies = [
  "anchor-lang",
  "async-trait",

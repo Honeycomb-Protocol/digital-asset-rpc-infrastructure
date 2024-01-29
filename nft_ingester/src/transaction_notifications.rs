@@ -96,7 +96,9 @@ async fn handle_transaction(
         }
 
         let begin = Instant::now();
-        let res = manager.handle_transaction(&tx).await;
+        let res: Result<(), crate::error::IngesterError> = manager.handle_transaction(&tx).await;
+        // Get account keys.
+        debug!("hello: {:?}", tx.account_keys());
         let should_ack = capture_result(
             id.clone(),
             TRANSACTION_STREAM,

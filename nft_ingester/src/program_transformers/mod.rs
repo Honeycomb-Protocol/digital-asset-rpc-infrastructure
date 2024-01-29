@@ -88,7 +88,8 @@ impl ProgramTransformer {
     ) -> Result<(), IngesterError> {
         let sig: Option<&str> = tx.signature();
         info!("Handling Transaction: {:?}", sig);
-        let instructions = self.break_transaction(tx);
+        let tx_clone = tx.clone();
+        let instructions = self.break_transaction(&tx_clone);
         let accounts = tx.account_keys().unwrap_or_default();
         let slot = tx.slot();
         let txn_id = tx.signature().unwrap_or("");
@@ -99,10 +100,7 @@ impl ProgramTransformer {
         let mut not_impl = 0;
         let ixlen = instructions.len();
         debug!("Instructions: {}", ixlen);
-        let contains = instructions
-            .iter()
-            .filter(|(ib, _inner)| ib.0 .0.as_ref() == mpl_bubblegum::ID.as_ref());
-        debug!("Instructions bgum: {}", contains.count());
+
         for (outer_ix, inner_ix) in instructions {
             let (program, instruction) = outer_ix;
             let ix_accounts = instruction.accounts().unwrap().iter().collect::<Vec<_>>();
