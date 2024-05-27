@@ -21,7 +21,7 @@ schemars_derive = { workspace = true }
 sea-orm = { optional = true, features = ["macros", "runtime-tokio-rustls", "sqlx-postgres", "with-chrono", "mock"], workspace = true }
 sea-query = { workspace = true, features = ["postgres-array"] }
 serde = { workspace = true, optional = true }
-serde_json = { workspace = true, features = ["preserve_order"], optional = true }
+serde_json = { workspace = true, optional = true }
 solana-sdk = { workspace = true }
 spl-concurrent-merkle-tree = { workspace = true }
 thiserror = { workspace = true }

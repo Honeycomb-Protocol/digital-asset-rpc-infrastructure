@@ -2757,9 +2757,9 @@ dependencies = [
 
 [[package]]
 name = "hpl-toolkit"
-version = "0.0.3-beta.21"
+version = "0.0.3-beta.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf0918314abe136edd2a8a5b2c74970e5c99a3c285e2768ed1a3b36f6df9f9d5"
+checksum = "02bb943f3a8d7b2199524b7c2390857aa3899fde3b4650136b7dc9cedd0ba90b"
 dependencies = [
  "anchor-lang 0.29.0",
  "hpl-toolkit-attribute-account-schemas-ix-injector",
