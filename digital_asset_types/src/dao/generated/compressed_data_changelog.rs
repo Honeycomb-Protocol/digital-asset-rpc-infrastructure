@@ -15,23 +15,25 @@ impl EntityName for Entity {
 #[derive(Clone, Debug, PartialEq, DeriveModel, DeriveActiveModel, Serialize, Deserialize)]
 pub struct Model {
     pub id: u64,
-    pub compressed_data_id: Vec<u8>,
+    pub tree_id: Vec<u8>,
+    pub leaf_idx: i64,
     pub key: Option<String>,
     pub data: Json,
-    pub seq: u64,
+    pub seq: i64,
+    pub slot: i64,
     pub created_at: Option<DateTimeWithTimeZone>,
-    pub slot_updated: i64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveColumn)]
 pub enum Column {
     Id,
-    CompressedDataId,
+    TreeId,
+    LeafIdx,
     Key,
     Data,
     Seq,
+    Slot,
     CreatedAt,
-    SlotUpdated,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DerivePrimaryKey)]
@@ -54,12 +56,13 @@ impl ColumnTrait for Column {
     fn def(&self) -> ColumnDef {
         match self {
             Self::Id => ColumnType::BigInteger.def(),
-            Self::CompressedDataId => ColumnType::Binary.def(),
+            Self::TreeId => ColumnType::Binary.def(),
+            Self::LeafIdx => ColumnType::BigInteger.def(),
             Self::Key => ColumnType::Text.def(),
             Self::Data => ColumnType::JsonBinary.def(),
             Self::Seq => ColumnType::BigInteger.def(),
+            Self::Slot => ColumnType::BigInteger.def(),
             Self::CreatedAt => ColumnType::TimestampWithTimeZone.def().null(),
-            Self::SlotUpdated => ColumnType::BigInteger.def(),
         }
     }
 }

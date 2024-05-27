@@ -113,53 +113,29 @@ async fn handle_leaf<'c, T: ConnectionTrait + TransactionTrait>(
     let patch_key: Option<String>;
     let patch_data: Option<SchemaValue>;
 
+    let leaf_idx = leaf_idx as i64;
+    let seq = seq as i64;
+    let slot = slot as i64;
     match stream_type {
         CompressedDataEventStream::Full { data } => {
             patch_key = None;
             patch_data = Some(data.clone());
-            handle_full_leaf(
-                txn,
-                compressed_data_id.clone(),
-                tree_id,
-                leaf_idx,
-                data,
-                seq,
-                slot,
-            )
-            .await?;
+            handle_full_leaf(txn, compressed_data_id, tree_id, leaf_idx, data, seq, slot).await?;
         }
         CompressedDataEventStream::PatchChunk { key, data } => {
             patch_key = Some(key.clone());
             patch_data = Some(data.clone());
-            handle_leaf_patch(
-                txn,
-                compressed_data_id.clone(),
-                tree_id,
-                leaf_idx,
-                key,
-                data,
-                seq,
-                slot,
-            )
-            .await?;
+            handle_leaf_patch(txn, compressed_data_id, key, data, slot).await?;
         }
         CompressedDataEventStream::Empty => {
             patch_key = None;
             patch_data = None;
-            handle_empty_leaf(
-                txn,
-                compressed_data_id.clone(),
-                tree_id,
-                leaf_idx,
-                seq,
-                slot,
-            )
-            .await?;
+            handle_empty_leaf(txn, compressed_data_id).await?;
         }
     }
 
     if let Some(data) = patch_data {
-        handle_change_log(txn, compressed_data_id, patch_key, data, seq, slot).await?;
+        handle_change_log(txn, tree_id, leaf_idx, patch_key, data, seq, slot).await?;
     }
 
     Ok(())
@@ -169,10 +145,10 @@ async fn handle_full_leaf<'c, T: ConnectionTrait + TransactionTrait>(
     txn: &T,
     id: Vec<u8>,
     tree_id: [u8; 32],
-    leaf_idx: u32,
+    leaf_idx: i64,
     mut data: SchemaValue,
-    seq: u64,
-    slot: u64,
+    seq: i64,
+    slot: i64,
 ) -> Result<(), IngesterError> {
     let tree = merkle_tree::Entity::find_by_id(tree_id.to_vec())
         .one(txn)
@@ -209,12 +185,12 @@ async fn handle_full_leaf<'c, T: ConnectionTrait + TransactionTrait>(
     let item = compressed_data::ActiveModel {
         id: Set(id),
         tree_id: Set(tree_id.to_vec()),
-        leaf_idx: Set(leaf_idx as i64),
-        seq: Set(seq as i64),
+        leaf_idx: Set(leaf_idx),
+        seq: Set(seq),
         schema_validated: Set(schema_validated),
         raw_data: Set(raw_data),
         parsed_data: Set(data.into()),
-        slot_updated: Set(slot as i64),
+        slot_updated: Set(slot),
         ..Default::default()
     };
     let query = compressed_data::Entity::insert(item)
@@ -241,18 +217,10 @@ async fn handle_full_leaf<'c, T: ConnectionTrait + TransactionTrait>(
 async fn handle_leaf_patch<'c, T: ConnectionTrait + TransactionTrait>(
     txn: &T,
     id: Vec<u8>,
-    tree_id: [u8; 32],
-    leaf_idx: u32,
     key: String,
     data: SchemaValue,
-    _seq: u64,
-    _slot: u64,
+    slot: i64,
 ) -> Result<(), IngesterError> {
-    info!(
-        "Patch leaf for {} at index {}",
-        bs58::encode(tree_id).into_string(),
-        leaf_idx
-    );
     let found = compressed_data::Entity::find()
         .filter(compressed_data::Column::Id.eq(id.to_owned()))
         .one(txn)
@@ -285,6 +253,8 @@ async fn handle_leaf_patch<'c, T: ConnectionTrait + TransactionTrait>(
     db_data.parsed_data = Set(parsed_data);
     debug!("Data updated in object");
 
+    db_data.slot_updated = Set(slot);
+
     let query: Statement = compressed_data::Entity::update(db_data)
         .filter(compressed_data::Column::Id.eq(id))
         .build(DbBackend::Postgres);
@@ -294,16 +264,7 @@ async fn handle_leaf_patch<'c, T: ConnectionTrait + TransactionTrait>(
 async fn handle_empty_leaf<'c, T: ConnectionTrait + TransactionTrait>(
     txn: &T,
     id: Vec<u8>,
-    tree_id: [u8; 32],
-    leaf_idx: u32,
-    _seq: u64,
-    _slot: u64,
 ) -> Result<(), IngesterError> {
-    info!(
-        "Remove leaf for {} at index {}",
-        bs58::encode(tree_id).into_string(),
-        leaf_idx
-    );
     let found = compressed_data::Entity::find()
         .filter(compressed_data::Column::Id.eq(id.clone()))
         .one(txn)
@@ -329,18 +290,20 @@ async fn handle_empty_leaf<'c, T: ConnectionTrait + TransactionTrait>(
 
 async fn handle_change_log<'c, T: ConnectionTrait + TransactionTrait>(
     txn: &T,
-    compressed_data_id: Vec<u8>,
+    tree_id: [u8; 32],
+    leaf_idx: i64,
     key: Option<String>,
     data: SchemaValue,
-    seq: u64,
-    slot: u64,
+    seq: i64,
+    slot: i64,
 ) -> Result<(), IngesterError> {
     let change_log = compressed_data_changelog::ActiveModel {
-        compressed_data_id: Set(compressed_data_id),
+        tree_id: Set(tree_id.to_vec()),
+        leaf_idx: Set(leaf_idx),
         key: Set(key),
         data: Set(data.into()),
         seq: Set(seq),
-        slot_updated: Set(slot as i64),
+        slot: Set(slot),
         ..Default::default()
     };
 

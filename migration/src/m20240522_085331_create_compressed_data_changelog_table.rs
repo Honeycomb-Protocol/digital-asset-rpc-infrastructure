@@ -19,8 +19,13 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(
-                        ColumnDef::new(CompressedDataChangelog::CompressedDataId)
+                        ColumnDef::new(CompressedDataChangelog::TreeId)
                             .binary()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(CompressedDataChangelog::LeafIdx)
+                            .big_integer()
                             .not_null(),
                     )
                     .col(ColumnDef::new(CompressedDataChangelog::Key).text().null())
@@ -35,14 +40,14 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(CompressedDataChangelog::CreatedAt)
-                            .date_time()
-                            .default(SimpleExpr::Keyword(Keyword::CurrentTimestamp))
+                        ColumnDef::new(CompressedDataChangelog::Slot)
+                            .big_integer()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(CompressedDataChangelog::SlotUpdated)
-                            .big_integer()
+                        ColumnDef::new(CompressedDataChangelog::CreatedAt)
+                            .date_time()
+                            .default(SimpleExpr::Keyword(Keyword::CurrentTimestamp))
                             .not_null(),
                     )
                     .to_owned(),
@@ -66,10 +71,11 @@ impl MigrationTrait for Migration {
 enum CompressedDataChangelog {
     Table,
     Id,
-    CompressedDataId,
+    TreeId,
+    LeafIdx,
     Key,
     Data,
     Seq,
+    Slot,
     CreatedAt,
-    SlotUpdated,
 }
