@@ -5,10 +5,11 @@ use crate::dao::Pagination;
 use crate::dao::{asset, asset_authority, asset_creators, asset_data, asset_grouping};
 use crate::rpc::filter::{AssetSortBy, AssetSortDirection, AssetSorting};
 use crate::rpc::options::Options;
+use crate::rpc::response::TransactionSignatureList;
 use crate::rpc::response::{AssetError, AssetList};
 use crate::rpc::{
     Asset as RpcAsset, Authority, Compression, Content, Creator, File, Group, Interface,
-    MetadataMap, Ownership, Royalty, Scope, Supply, Uses,
+    MetadataMap, MplCoreInfo, Ownership, Royalty, Scope, Supply, Uses,
 };
 use jsonpath_lib::JsonPathError;
 use log::warn;
@@ -80,6 +81,31 @@ pub fn build_asset_response(
         items,
         errors,
         cursor,
+    }
+}
+
+pub fn build_transaction_signatures_response(
+    items: Vec<(String, String)>,
+    limit: u64,
+    pagination: &Pagination,
+) -> TransactionSignatureList {
+    let total = items.len() as u32;
+    let (page, before, after) = match pagination {
+        Pagination::Keyset { before, after } => {
+            let bef = before.clone().and_then(|x| String::from_utf8(x).ok());
+            let aft = after.clone().and_then(|x| String::from_utf8(x).ok());
+            (None, bef, aft)
+        }
+        Pagination::Page { page } => (Some(*page), None, None),
+        Pagination::Cursor { .. } => (None, None, None),
+    };
+    TransactionSignatureList {
+        total,
+        limit: limit as u32,
+        page: page.map(|x| x as u32),
+        before,
+        after,
+        items,
     }
 }
 
@@ -342,6 +368,15 @@ pub fn asset_to_rpc(asset: FullAsset, options: &Options) -> Result<RpcAsset, DbE
         .unwrap_or(false);
     let edition_nonce =
         safe_select(chain_data_selector, "$.edition_nonce").and_then(|v| v.as_u64());
+    let mpl_core_info = match interface {
+        Interface::MplCoreAsset | Interface::MplCoreCollection => Some(MplCoreInfo {
+            num_minted: asset.mpl_core_collection_num_minted,
+            current_size: asset.mpl_core_collection_current_size,
+            plugins_json_version: asset.mpl_core_plugins_json_version,
+        }),
+        _ => None,
+    };
+
     Ok(RpcAsset {
         interface: interface.clone(),
         id: bs58::encode(asset.id).into_string(),
@@ -363,11 +398,11 @@ pub fn asset_to_rpc(asset: FullAsset, options: &Options) -> Result<RpcAsset, DbE
                 .unwrap_or_default(),
             data_hash: asset
                 .data_hash
-                .map(|e| e.trim().to_string())
+                .map(|e| if asset.compressed { e.trim() } else { "" }.to_string())
                 .unwrap_or_default(),
             creator_hash: asset
                 .creator_hash
-                .map(|e| e.trim().to_string())
+                .map(|e| if asset.compressed { e.trim() } else { "" }.to_string())
                 .unwrap_or_default(),
         }),
         grouping: Some(rpc_groups),
@@ -409,6 +444,9 @@ pub fn asset_to_rpc(asset: FullAsset, options: &Options) -> Result<RpcAsset, DbE
             remaining: u.get("remaining").and_then(|t| t.as_u64()).unwrap_or(0),
         }),
         burnt: asset.burnt,
+        plugins: asset.mpl_core_plugins,
+        unknown_plugins: asset.mpl_core_unknown_plugins,
+        mpl_core_info,
     })
 }
 

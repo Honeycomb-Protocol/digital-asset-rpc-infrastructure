@@ -41,11 +41,20 @@ pub struct Model {
     pub created_at: Option<DateTimeWithTimeZone>,
     pub burnt: bool,
     pub slot_updated: Option<i64>,
+    pub slot_updated_metadata_account: Option<i64>,
+    pub slot_updated_mint_account: Option<i64>,
+    pub slot_updated_token_account: Option<i64>,
+    pub slot_updated_cnft_transaction: Option<i64>,
     pub data_hash: Option<String>,
     pub creator_hash: Option<String>,
     pub owner_delegate_seq: Option<i64>,
     pub leaf_seq: Option<i64>,
     pub base_info_seq: Option<i64>,
+    pub mpl_core_plugins: Option<Json>,
+    pub mpl_core_unknown_plugins: Option<Json>,
+    pub mpl_core_collection_num_minted: Option<i32>,
+    pub mpl_core_collection_current_size: Option<i32>,
+    pub mpl_core_plugins_json_version: Option<i32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveColumn)]
@@ -73,11 +82,20 @@ pub enum Column {
     CreatedAt,
     Burnt,
     SlotUpdated,
+    SlotUpdatedMetadataAccount,
+    SlotUpdatedMintAccount,
+    SlotUpdatedTokenAccount,
+    SlotUpdatedCnftTransaction,
     DataHash,
     CreatorHash,
     OwnerDelegateSeq,
     LeafSeq,
     BaseInfoSeq,
+    MplCorePlugins,
+    MplCoreUnknownPlugins,
+    MplCoreCollectionNumMinted,
+    MplCoreCollectionCurrentSize,
+    MplCorePluginsJsonVersion,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DerivePrimaryKey)]
@@ -93,13 +111,7 @@ impl PrimaryKeyTrait for PrimaryKey {
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]
-pub enum Relation {
-    AssetData,
-    AssetV1AccountAttachments,
-    AssetCreators,
-    AssetAuthority,
-    AssetGrouping,
-}
+pub enum Relation {}
 
 impl ColumnTrait for Column {
     type EntityName = Entity;
@@ -128,59 +140,27 @@ impl ColumnTrait for Column {
             Self::CreatedAt => ColumnType::TimestampWithTimeZone.def().null(),
             Self::Burnt => ColumnType::Boolean.def(),
             Self::SlotUpdated => ColumnType::BigInteger.def().null(),
+            Self::SlotUpdatedMetadataAccount => ColumnType::BigInteger.def().null(),
+            Self::SlotUpdatedMintAccount => ColumnType::BigInteger.def().null(),
+            Self::SlotUpdatedTokenAccount => ColumnType::BigInteger.def().null(),
+            Self::SlotUpdatedCnftTransaction => ColumnType::BigInteger.def().null(),
             Self::DataHash => ColumnType::Char(Some(50u32)).def().null(),
             Self::CreatorHash => ColumnType::Char(Some(50u32)).def().null(),
             Self::OwnerDelegateSeq => ColumnType::BigInteger.def().null(),
             Self::LeafSeq => ColumnType::BigInteger.def().null(),
             Self::BaseInfoSeq => ColumnType::BigInteger.def().null(),
+            Self::MplCorePlugins => ColumnType::JsonBinary.def().null(),
+            Self::MplCoreUnknownPlugins => ColumnType::JsonBinary.def().null(),
+            Self::MplCoreCollectionNumMinted => ColumnType::Integer.def().null(),
+            Self::MplCoreCollectionCurrentSize => ColumnType::Integer.def().null(),
+            Self::MplCorePluginsJsonVersion => ColumnType::Integer.def().null(),
         }
     }
 }
 
 impl RelationTrait for Relation {
     fn def(&self) -> RelationDef {
-        match self {
-            Self::AssetData => Entity::belongs_to(super::asset_data::Entity)
-                .from(Column::AssetData)
-                .to(super::asset_data::Column::Id)
-                .into(),
-            Self::AssetV1AccountAttachments => {
-                Entity::has_many(super::asset_v1_account_attachments::Entity).into()
-            }
-            Self::AssetCreators => Entity::has_many(super::asset_creators::Entity).into(),
-            Self::AssetAuthority => Entity::has_many(super::asset_authority::Entity).into(),
-            Self::AssetGrouping => Entity::has_many(super::asset_grouping::Entity).into(),
-        }
-    }
-}
-
-impl Related<super::asset_data::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::AssetData.def()
-    }
-}
-
-impl Related<super::asset_v1_account_attachments::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::AssetV1AccountAttachments.def()
-    }
-}
-
-impl Related<super::asset_creators::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::AssetCreators.def()
-    }
-}
-
-impl Related<super::asset_authority::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::AssetAuthority.def()
-    }
-}
-
-impl Related<super::asset_grouping::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::AssetGrouping.def()
+        panic!("No RelationDef")
     }
 }
 

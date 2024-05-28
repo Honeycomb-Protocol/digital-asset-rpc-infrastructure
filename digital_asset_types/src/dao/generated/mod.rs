@@ -10,7 +10,7 @@ pub mod asset_data;
 pub mod asset_grouping;
 pub mod asset_v1_account_attachments;
 pub mod backfill_items;
-pub mod cl_audits;
+pub mod cl_audits_v2;
 pub mod cl_items;
 pub mod compressed_data;
 pub mod compressed_data_changelog;

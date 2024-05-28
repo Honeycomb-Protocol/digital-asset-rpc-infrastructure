@@ -1,5 +1,10 @@
 version: "3.9"
 services:
+  builder:
+    image: das-api/builder
+    build:
+      context: .
+      dockerfile: Builder.Dockerfile
   # graphite:
   #   image: graphiteapp/graphite-statsd
   #   container_name: graphite
@@ -13,6 +18,7 @@ services:
   migrator:
     depends_on:
       - db
+      - builder
     environment:
       DATABASE_URL: postgres://solana:solana@db/solana
     build:
@@ -23,13 +29,14 @@ services:
   ingester:
     depends_on:
       - migrator
+      - builder
       - redis
       - db
       # - graphite
       - solana
     restart: always
     environment:
-      RUST_LOG: error
+      RUST_LOG: debug
       # INGESTER_METRICS_PORT: 8125
       # INGESTER_METRICS_HOST: graphite
       INGESTER_DATABASE_CONFIG: '{max_postgres_connections=, listener_channel="backfill_item_added", url="postgres://solana:solana@db/solana"}'
@@ -48,6 +55,7 @@ services:
   #   depends_on:
   #     - migrator
   #     - ingester
+  #     - builder
   #     - solana
   #   restart: always
   #   environment:
@@ -65,10 +73,11 @@ services:
     volumes:
       - ./metaplex-rpc-proxy/envoy-compose.yaml:/etc/envoy.yaml
     ports:
-      - 9091:9091
+      - 7601:9091
   api:
     depends_on:
       - migrator
+      - builder
     restart: always
     environment:
       APP_DATABASE_URL: postgres://solana:solana@db/solana
@@ -79,13 +88,13 @@ services:
       context: .
       dockerfile: Api.Dockerfile
     ports:
-      - 9090:9090
+      - 7600:9090
   redis:
     image: "redis:7.0.0"
     # ports:
     #   - "6379:6379"
   db:
-    image: "postgres:14"
+    image: 'postgres:14'
     restart: always
     command:
       [
@@ -98,18 +107,18 @@ services:
         "max_connections=200"
       ]
     ports:
-      - 5439:5432
+      - 7632:5432
     environment:
       POSTGRES_USER: solana # The PostgreSQL user (useful to connect to the database)
       POSTGRES_PASSWORD: solana # The PostgreSQL password (useful to connect to the database)
       POSTGRES_DB: solana
     volumes:
-      - /mnt/ledgerdb/localnet/db-data/:/var/lib/postgresql/data/:rw
+      - ./db-data/:/var/lib/postgresql/data/:rw
   solana:
     image: ghcr.io/metaplex-foundation/plerkle-test-validator:v1.6.0-1.69.0-v1.16.6
     volumes:
       - ./programs:/so/:ro
-      - /mnt/ledgerdb/localnet/ledger:/config:rw
+      - ./ledger:/config:rw
       - ./solana-test-validator-geyser-config:/plugin-config:rw
       - ./runs.sh:/runs.sh
     environment:
@@ -117,8 +126,8 @@ services:
       PLUGIN_MESSENGER_CONFIG.messenger_type: "Redis"
       PLUGIN_MESSENGER_CONFIG.connection_config: '{redis_connection_str="redis://redis"}'
     ports:
-      - "9092:8900"
-      - "8999:8899"
+      - "7602:8900"
+      - "7599:8899"
       # - "9092:8900"
       # - "8899:8899"
       # - "8900:8900"

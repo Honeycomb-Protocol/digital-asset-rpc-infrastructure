@@ -1,6 +1,8 @@
+use jsonrpsee::RpcModule;
 use log::debug;
 
-use crate::{api::*, DasApiError, RpcModule};
+use crate::{api::*, error::DasApiError};
+
 pub struct RpcApiBuilder;
 
 impl RpcApiBuilder {
@@ -132,6 +134,18 @@ impl RpcApiBuilder {
             },
         )?;
         module.register_alias("getAssetsByGroup", "get_assets_by_group")?;
+
+        module.register_async_method(
+            "getAssetSignatures",
+            |rpc_params, rpc_context| async move {
+                let payload = rpc_params.parse::<GetAssetSignatures>()?;
+                rpc_context
+                    .get_asset_signatures(payload)
+                    .await
+                    .map_err(Into::into)
+            },
+        )?;
+        module.register_alias("getSignaturesForAsset", "getAssetSignatures")?;
 
         module.register_async_method("search_assets", |rpc_params, rpc_context| async move {
             let payload = rpc_params.parse::<SearchAssets>()?;
