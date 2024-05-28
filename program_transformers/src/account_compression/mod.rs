@@ -5,28 +5,23 @@ use blockbuster::{
 };
 use log::{debug, info};
 use sea_orm::{ConnectionTrait, TransactionTrait};
-use tokio::sync::mpsc::UnboundedSender;
 
 mod append;
 mod close_tree;
-mod db;
 mod init_tree;
 mod insert_or_append;
 mod replace_leaf;
 mod transfer_authority;
 mod verify_leaf;
 
-pub use db::*;
-
-use crate::{error::IngesterError, tasks::TaskData};
+use crate::error::ProgramTransformerResult;
 
 pub async fn handle_account_compression_instruction<'c, T>(
     parsing_result: &'c AccountCompressionInstruction,
     bundle: &'c InstructionBundle<'c>,
     txn: &T,
-    _task_manager: &UnboundedSender<TaskData>,
     cl_audits: bool,
-) -> Result<(), IngesterError>
+) -> ProgramTransformerResult<()>
 where
     T: ConnectionTrait + TransactionTrait,
 {

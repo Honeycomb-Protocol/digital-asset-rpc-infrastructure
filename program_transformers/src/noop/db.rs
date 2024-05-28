@@ -1,5 +1,5 @@
-use crate::error::IngesterError;
-use anchor_lang::prelude::borsh::{BorshDeserialize, BorshSerialize};
+use crate::error::{ProgramTransformerError, ProgramTransformerResult};
+use anchor_lang::{AnchorDeserialize, AnchorSerialize};
 use digital_asset_types::dao::{compressed_data, compressed_data_changelog, merkle_tree};
 use hpl_toolkit::prelude::*;
 use log::{debug, info};
@@ -11,14 +11,14 @@ use spl_account_compression::events::ApplicationDataEventV1;
 async fn exec_query<'c, T: ConnectionTrait + TransactionTrait>(
     txn: &T,
     query: Statement,
-) -> Result<(), IngesterError> {
+) -> ProgramTransformerResult<()> {
     debug!(
         "Query builed successfully, {}, values {:#?}",
         query.sql, query.values
     );
     txn.execute(query)
         .await
-        .map_err(|db_err| IngesterError::StorageWriteError(db_err.to_string()))?;
+        .map_err(|db_err| ProgramTransformerError::StorageWriteError(db_err.to_string()))?;
     debug!("Query executed successfully");
     Ok(())
 }
@@ -26,7 +26,7 @@ async fn exec_query<'c, T: ConnectionTrait + TransactionTrait>(
 pub async fn save_applicationdata_event<'c, T>(
     application_data: &ApplicationDataEventV1,
     txn: &T,
-) -> Result<u64, IngesterError>
+) -> Result<u64, ProgramTransformerError>
 where
     T: ConnectionTrait + TransactionTrait,
 {
@@ -37,14 +37,14 @@ where
 pub async fn handle_application_data<'c, T>(
     application_data: &ApplicationDataEventV1,
     txn: &T,
-) -> Result<(), IngesterError>
+) -> ProgramTransformerResult<()>
 where
     T: ConnectionTrait + TransactionTrait,
 {
     debug!("Inserting AppData");
     let buf = &mut &application_data.application_data[..];
     let event = CompressedDataEvent::deserialize(buf)
-        .map_err(|db_err| IngesterError::CompressedDataParseError(db_err.to_string()))?;
+        .map_err(|db_err| ProgramTransformerError::CompressedDataParseError(db_err.to_string()))?;
     debug!("Application data parsed successfully");
     match event {
         CompressedDataEvent::TreeSchemaValue {
@@ -70,12 +70,12 @@ async fn handle_tree<'c, T: ConnectionTrait + TransactionTrait>(
     tree_id: [u8; 32],
     schema: Schema,
     program_id: [u8; 32],
-) -> Result<(), IngesterError> {
+) -> ProgramTransformerResult<()> {
     info!("Found new tree {}", bs58::encode(tree_id).into_string());
     // @TODO: Fetch and store, maxDepth, maxBufferSize, canopyDepth, etc...
     let data_schema = schema
         .try_to_vec()
-        .map_err(|db_err| IngesterError::CompressedDataParseError(db_err.to_string()))?;
+        .map_err(|db_err| ProgramTransformerError::CompressedDataParseError(db_err.to_string()))?;
 
     debug!("Parsed tree data schema");
 
@@ -104,7 +104,7 @@ async fn handle_leaf<'c, T: ConnectionTrait + TransactionTrait>(
     stream_type: CompressedDataEventStream,
     seq: u64,
     slot: u64,
-) -> Result<(), IngesterError> {
+) -> ProgramTransformerResult<()> {
     let compressed_data_id = anchor_lang::solana_program::keccak::hashv(
         &[&tree_id[..], &leaf_idx.to_le_bytes()[..]][..],
     )
@@ -149,23 +149,24 @@ async fn handle_full_leaf<'c, T: ConnectionTrait + TransactionTrait>(
     mut data: SchemaValue,
     seq: i64,
     slot: i64,
-) -> Result<(), IngesterError> {
+) -> ProgramTransformerResult<()> {
     let tree = merkle_tree::Entity::find_by_id(tree_id.to_vec())
         .one(txn)
         .await
-        .map_err(|db_err| IngesterError::StorageReadError(db_err.to_string()))?;
+        .map_err(|db_err| ProgramTransformerError::StorageReadError(db_err.to_string()))?;
 
     debug!("Find tree query executed successfully");
 
     let mut schema_validated: bool = false;
     if let Some(tree) = tree {
         debug!("Parsing tree data schema");
-        let schema = Schema::deserialize(&mut &tree.data_schema[..])
-            .map_err(|db_err| IngesterError::CompressedDataParseError(db_err.to_string()))?;
+        let schema = Schema::deserialize(&mut &tree.data_schema[..]).map_err(|db_err| {
+            ProgramTransformerError::CompressedDataParseError(db_err.to_string())
+        })?;
 
         debug!("Parsed tree data schema");
         if !schema.validate(&mut data) {
-            return Err(IngesterError::CompressedDataParseError(format!(
+            return Err(ProgramTransformerError::CompressedDataParseError(format!(
                 "Schema value validation failed for data: {} with schema: {}",
                 data.to_string(),
                 schema.to_string()
@@ -179,7 +180,7 @@ async fn handle_full_leaf<'c, T: ConnectionTrait + TransactionTrait>(
     debug!("Serializing raw data");
     let raw_data = data
         .try_to_vec()
-        .map_err(|db_err| IngesterError::CompressedDataParseError(db_err.to_string()))?;
+        .map_err(|db_err| ProgramTransformerError::CompressedDataParseError(db_err.to_string()))?;
     debug!("Serialized raw data");
 
     let item = compressed_data::ActiveModel {
@@ -220,17 +221,17 @@ async fn handle_leaf_patch<'c, T: ConnectionTrait + TransactionTrait>(
     key: String,
     data: SchemaValue,
     slot: i64,
-) -> Result<(), IngesterError> {
+) -> ProgramTransformerResult<()> {
     let found = compressed_data::Entity::find()
         .filter(compressed_data::Column::Id.eq(id.to_owned()))
         .one(txn)
         .await
-        .map_err(|db_err| IngesterError::StorageReadError(db_err.to_string()))?;
+        .map_err(|db_err| ProgramTransformerError::StorageReadError(db_err.to_string()))?;
 
     debug!("Find old_data query executed successfully");
 
     if found.is_none() {
-        return Err(IngesterError::StorageReadError(
+        return Err(ProgramTransformerError::StorageReadError(
             "Could not find old data in db".to_string(),
         ));
     }
@@ -264,17 +265,17 @@ async fn handle_leaf_patch<'c, T: ConnectionTrait + TransactionTrait>(
 async fn handle_empty_leaf<'c, T: ConnectionTrait + TransactionTrait>(
     txn: &T,
     id: Vec<u8>,
-) -> Result<(), IngesterError> {
+) -> ProgramTransformerResult<()> {
     let found = compressed_data::Entity::find()
         .filter(compressed_data::Column::Id.eq(id.clone()))
         .one(txn)
         .await
-        .map_err(|db_err| IngesterError::StorageReadError(db_err.to_string()))?;
+        .map_err(|db_err| ProgramTransformerError::StorageReadError(db_err.to_string()))?;
 
     debug!("Find old_data query executed successfully");
 
     if found.is_none() {
-        return Err(IngesterError::StorageReadError(
+        return Err(ProgramTransformerError::StorageReadError(
             "Could not find old data in db".to_string(),
         ));
     }
@@ -296,7 +297,7 @@ async fn handle_change_log<'c, T: ConnectionTrait + TransactionTrait>(
     data: SchemaValue,
     seq: i64,
     slot: i64,
-) -> Result<(), IngesterError> {
+) -> ProgramTransformerResult<()> {
     let change_log = compressed_data_changelog::ActiveModel {
         tree_id: Set(tree_id.to_vec()),
         leaf_idx: Set(leaf_idx),

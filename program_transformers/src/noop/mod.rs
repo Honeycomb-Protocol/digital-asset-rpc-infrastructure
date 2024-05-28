@@ -1,21 +1,17 @@
+use crate::error::ProgramTransformerResult;
 use blockbuster::{self, instruction::InstructionBundle, programs::noop::NoopInstruction};
-// use log::info;
 use log::debug;
 use sea_orm::{ConnectionTrait, TransactionTrait};
-use tokio::sync::mpsc::UnboundedSender;
 mod db;
 
 pub use db::*;
-
-use crate::{error::IngesterError, tasks::TaskData};
 
 pub async fn handle_noop_instruction<'c, T>(
     parsing_result: &'c NoopInstruction,
     _bundle: &'c InstructionBundle<'c>,
     txn: &T,
-    _task_manager: &UnboundedSender<TaskData>,
     _cl_audits: bool,
-) -> Result<(), IngesterError>
+) -> ProgramTransformerResult<()>
 where
     T: ConnectionTrait + TransactionTrait,
 {

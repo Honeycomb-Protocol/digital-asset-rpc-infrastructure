@@ -1,4 +1,4 @@
-use crate::error::IngesterError;
+use crate::error::ProgramTransformerResult;
 use blockbuster::{
     instruction::InstructionBundle, programs::account_compression::AccountCompressionInstruction,
 };
@@ -11,7 +11,7 @@ pub async fn transfer_authority<'c, T>(
     _bundle: &InstructionBundle<'c>,
     _txn: &'c T,
     _cl_audits: bool,
-) -> Result<(), IngesterError>
+) -> ProgramTransformerResult<()>
 where
     T: ConnectionTrait + TransactionTrait,
 {

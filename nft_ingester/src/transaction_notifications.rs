@@ -25,7 +25,7 @@ use solana_client::nonblocking::rpc_client::RpcClient;
 pub fn transaction_worker<T: Messenger>(
     pool: Pool<Postgres>,
     config: MessengerConfig,
-    rpc_client: RpcClient,
+    _rpc_client: RpcClient,
     bg_task_sender: UnboundedSender<TaskData>,
     ack_channel: UnboundedSender<(&'static str, String)>,
     consumption_type: ConsumptionType,

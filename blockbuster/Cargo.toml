@@ -14,6 +14,7 @@ async-trait = {workspace = true}
 borsh = {workspace = true}
 bs58 = {workspace = true}
 bytemuck = {workspace = true}
+hpl-toolkit = { workspace = true }
 lazy_static = {workspace = true}
 log = {workspace = true}
 mpl-bubblegum = {workspace = true}

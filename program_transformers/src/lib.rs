@@ -1,10 +1,11 @@
 use {
     crate::{
-        bubblegum::handle_bubblegum_instruction,
         account_compression::handle_account_compression_instruction,
-        noop::handle_noop_instruction,
+        bubblegum::handle_bubblegum_instruction,
         error::{ProgramTransformerError, ProgramTransformerResult},
+        hpl_programs::handle_hpl_character_manager_account,
         mpl_core_program::handle_mpl_core_account,
+        noop::handle_noop_instruction,
         token::handle_token_program_account,
         token_metadata::handle_token_metadata_account,
     },
@@ -12,9 +13,10 @@ use {
         instruction::{order_instructions, InstructionBundle, IxPair},
         program_handler::ProgramParser,
         programs::{
-            bubblegum::BubblegumParser, mpl_core_program::MplCoreParser,
-            token_account::TokenAccountParser, token_metadata::TokenMetadataParser,
-            ProgramParseResult,
+            account_compression::AccountCompressionParser, bubblegum::BubblegumParser,
+            hpl_character_manager::HplCharacterManagerParser, mpl_core_program::MplCoreParser,
+            noop::NoopParser, token_account::TokenAccountParser,
+            token_metadata::TokenMetadataParser, ProgramParseResult,
         },
     },
     futures::future::BoxFuture,
@@ -30,15 +32,15 @@ use {
     tracing::{debug, error, info},
 };
 
+mod account_compression;
 mod asset_upserts;
 mod bubblegum;
 pub mod error;
+mod hpl_programs;
 mod mpl_core_program;
+mod noop;
 mod token;
 mod token_metadata;
-mod account_compression;
-mod hpl_programs;
-mod noop;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountInfo {
@@ -103,10 +105,16 @@ impl ProgramTransformer {
         let token_metadata = TokenMetadataParser {};
         let token = TokenAccountParser {};
         let mpl_core = MplCoreParser {};
+        let account_compression = AccountCompressionParser {};
+        let noop = NoopParser {};
+        let hpl_character_manager = HplCharacterManagerParser {};
         parsers.insert(bgum.key(), Box::new(bgum));
         parsers.insert(token_metadata.key(), Box::new(token_metadata));
         parsers.insert(token.key(), Box::new(token));
         parsers.insert(mpl_core.key(), Box::new(mpl_core));
+        parsers.insert(account_compression.key(), Box::new(account_compression));
+        parsers.insert(noop.key(), Box::new(noop));
+        parsers.insert(hpl_character_manager.key(), Box::new(hpl_character_manager));
         let hs = parsers.iter().fold(HashSet::new(), |mut acc, (k, _)| {
             acc.insert(*k);
             acc
@@ -207,14 +215,13 @@ impl ProgramTransformer {
                             parsing_result,
                             &ix,
                             &self.storage,
-                            &self.task_sender,
                             self.cl_audits,
                         )
                         .await
                         .map_err(|err| {
                             error!(
                                 "Failed to handle account compression instruction for txn {:?}: {:?}",
-                                sig, err
+                                tx_info.signature, err
                             );
                             return err;
                         })?;
@@ -225,7 +232,6 @@ impl ProgramTransformer {
                             parsing_result,
                             &ix,
                             &self.storage,
-                            &self.task_sender,
                             self.cl_audits,
                         )
                         .await
@@ -234,7 +240,7 @@ impl ProgramTransformer {
                             Err(err) => {
                                 error!(
                                     "Failed to handle noop instruction for txn {:?}: {:?}",
-                                    sig, err
+                                    tx_info.signature, err
                                 );
                             }
                         }
@@ -284,6 +290,14 @@ impl ProgramTransformer {
                         parsing_result,
                         &self.storage,
                         &self.download_metadata_notifier,
+                    )
+                    .await
+                }
+                ProgramParseResult::HplCharacterManager(parsing_result) => {
+                    handle_hpl_character_manager_account(
+                        account_info,
+                        parsing_result,
+                        &self.storage,
                     )
                     .await
                 }

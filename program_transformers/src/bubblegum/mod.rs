@@ -25,6 +25,8 @@ mod redeem;
 mod transfer;
 mod update_metadata;
 
+pub use db::insert_change_log;
+
 pub async fn handle_bubblegum_instruction<'c, T>(
     parsing_result: &'c BubblegumInstruction,
     bundle: &'c InstructionBundle<'c>,

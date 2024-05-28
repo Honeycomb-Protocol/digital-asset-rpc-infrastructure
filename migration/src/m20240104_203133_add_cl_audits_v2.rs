@@ -3,7 +3,7 @@ use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 use sea_orm_migration::sea_query::extension::postgres::Type;
 
-use crate::model::r#enum::BubblegumInstruction;
+use crate::model::r#enum::CompressionInstructions;
 use crate::model::table::ClAuditsV2;
 
 #[derive(DeriveMigrationName)]
@@ -16,7 +16,7 @@ impl MigrationTrait for Migration {
             .create_type(
                 Type::create()
                     .as_enum(ClAuditsV2::Instruction)
-                    .values(all::<BubblegumInstruction>().collect::<Vec<_>>())
+                    .values(all::<CompressionInstructions>().collect::<Vec<_>>())
                     .to_owned(),
             )
             .await?;
@@ -46,7 +46,7 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(ClAuditsV2::Instruction)
                             .enumeration(
                                 ClAuditsV2::Instruction,
-                                all::<BubblegumInstruction>().collect::<Vec<_>>(),
+                                all::<CompressionInstructions>().collect::<Vec<_>>(),
                             )
                             .not_null(),
                     )

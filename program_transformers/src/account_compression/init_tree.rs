@@ -1,4 +1,7 @@
-use crate::{error::IngesterError, program_transformers::account_compression::insert_change_log};
+use crate::{
+    bubblegum::insert_change_log,
+    error::{ProgramTransformerError, ProgramTransformerResult},
+};
 use blockbuster::{
     instruction::InstructionBundle, programs::account_compression::AccountCompressionInstruction,
 };
@@ -10,14 +13,14 @@ pub async fn init_tree<'c, T>(
     bundle: &InstructionBundle<'c>,
     txn: &'c T,
     cl_audits: bool,
-) -> Result<(), IngesterError>
+) -> ProgramTransformerResult<()>
 where
     T: ConnectionTrait + TransactionTrait,
 {
     if let Some(cl) = &parsing_result.tree_update {
-        return insert_change_log(cl, bundle.slot, bundle.txn_id, txn, cl_audits).await;
+        return insert_change_log(cl, bundle.slot, bundle.txn_id, txn, "unknown", cl_audits).await;
     }
-    Err(IngesterError::ParsingError(
+    Err(ProgramTransformerError::ParsingError(
         "Ix not parsed correctly".to_string(),
     ))
 }

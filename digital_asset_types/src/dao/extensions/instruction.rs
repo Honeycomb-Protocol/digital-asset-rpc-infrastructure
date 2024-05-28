@@ -18,6 +18,9 @@ impl From<&str> for Instruction {
             "VerifyCollection" => Instruction::VerifyCollection,
             "VerifyCreator" => Instruction::VerifyCreator,
             "UpdateMetadata" => Instruction::UpdateMetadata,
+            "LowLevelInitTree" => Instruction::LowLevelInitTree,
+            "LowLevelAppend" => Instruction::LowLevelAppend,
+            "LowLevelReplace" => Instruction::LowLevelReplace,
             _ => Instruction::Unknown,
         }
     }
@@ -46,6 +49,9 @@ impl PascalCase for Instruction {
             Instruction::VerifyCollection => "VerifyCollection",
             Instruction::VerifyCreator => "VerifyCreator",
             Instruction::UpdateMetadata => "UpdateMetadata",
+            Instruction::LowLevelInitTree => "LowLevelInitTree",
+            Instruction::LowLevelAppend => "LowLevelAppend",
+            Instruction::LowLevelReplace => "LowLevelReplace",
         };
         s.to_string()
     }

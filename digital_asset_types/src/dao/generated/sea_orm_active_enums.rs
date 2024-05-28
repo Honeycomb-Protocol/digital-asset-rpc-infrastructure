@@ -162,4 +162,10 @@ pub enum Instruction {
     VerifyCollection,
     #[sea_orm(string_value = "verify_creator")]
     VerifyCreator,
+    #[sea_orm(string_value = "low_level_init_tree")]
+    LowLevelInitTree,
+    #[sea_orm(string_value = "low_level_append")]
+    LowLevelAppend,
+    #[sea_orm(string_value = "low_level_replace")]
+    LowLevelReplace,
 }

@@ -9,7 +9,7 @@ pub enum Mutability {
 }
 
 #[derive(Iden, Debug, PartialEq, Sequence)]
-pub enum BubblegumInstruction {
+pub enum CompressionInstructions {
     Unknown,
     MintV1,
     Redeem,
@@ -25,7 +25,9 @@ pub enum BubblegumInstruction {
     UnverifyCollection,
     SetAndVerifyCollection,
     MintToCollectionV1,
-    // Any new values cannot be added here, or else they will be added twice by the migrator (which will fail).
-    // We need to use an alias instead.
-    // UpdateMetadata,
+    LowLevelInitTree,
+    LowLevelAppend,
+    LowLevelReplace, // Any new values cannot be added here, or else they will be added twice by the migrator (which will fail).
+                     // We need to use an alias instead.
+                     // UpdateMetadata,
 }

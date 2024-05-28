@@ -6,6 +6,8 @@ pub type ProgramTransformerResult<T> = Result<T, ProgramTransformerError>;
 pub enum ProgramTransformerError {
     #[error("ChangeLog Event Malformed")]
     ChangeLogEventMalformed,
+    #[error("Storage Read Error: {0}")]
+    StorageReadError(String),
     #[error("Storage Write Error: {0}")]
     StorageWriteError(String),
     #[error("NotImplemented")]
@@ -22,6 +24,8 @@ pub enum ProgramTransformerError {
     AssetIndexError(String),
     #[error("Failed to notify about download metadata: {0}")]
     DownloadMetadataNotify(Box<dyn std::error::Error + Send + Sync>),
+    #[error("Failed to parse compressed data: {0}")]
+    CompressedDataParseError(String),
 }
 
 impl From<BlockbusterError> for ProgramTransformerError {
