@@ -1,5 +1,5 @@
 ## IMPORTANT: See Prerequisites below
-
+    
 ## Digital Asset RPC API Infrastructure
 
 This repo houses the API Ingester and Database Types components of the Metaplex Digital Asset RPC API. Together these
