@@ -1,5 +1,10 @@
 version: "3.9"
 services:
+  builder:
+    image: das-api/builder
+    build:
+      context: .
+      dockerfile: Builder.Dockerfile
   # graphite:
   #   image: graphiteapp/graphite-statsd
   #   container_name: graphite
@@ -13,6 +18,7 @@ services:
   migrator:
     depends_on:
       - db
+      - builder
     environment:
       DATABASE_URL: postgres://solana:solana@db/solana
     build:
@@ -23,6 +29,7 @@ services:
   ingester:
     depends_on:
       - migrator
+      - builder
       - redis
       - db
       # - graphite
@@ -48,6 +55,7 @@ services:
   #   depends_on:
   #     - migrator
   #     - ingester
+  #     - builder
   #     - solana
   #   restart: always
   #   environment:
@@ -69,6 +77,7 @@ services:
   api:
     depends_on:
       - migrator
+      - builder
     restart: always
     environment:
       APP_DATABASE_URL: postgres://solana:solana@db/solana
@@ -85,7 +94,7 @@ services:
     # ports:
     #   - "6379:6379"
   db:
-    image: "postgres:14"
+    image: 'postgres:14'
     restart: always
     command:
       [

@@ -7,9 +7,10 @@ use digital_asset_types::{
         Cursor, PageOptions, SearchAssetsQuery,
     },
     dapi::{
-        get_asset, get_asset_proofs, get_assets, get_assets_by_authority, get_assets_by_creator,
-        get_assets_by_group, get_assets_by_owner, get_characters, get_compressed_accounts,
-        get_compressed_data, get_proof, get_proof_for_asset, search_assets,
+        get_asset, get_asset_proofs, get_asset_signatures, get_assets, get_assets_by_authority,
+        get_assets_by_creator, get_assets_by_group, get_assets_by_owner, get_characters,
+        get_compressed_accounts, get_compressed_data, get_proof, get_proof_for_asset,
+        search_assets,
     },
     rpc::{
         filter::{AssetSortBy, SearchConditionType},
@@ -20,13 +21,13 @@ use digital_asset_types::{
 use open_rpc_derive::document_rpc;
 use sea_orm::{sea_query::ConditionType, ConnectionTrait, DbBackend, Statement};
 
+use crate::error::DasApiError;
 use crate::validation::{validate_opt_pubkey, validate_search_with_name};
 use open_rpc_schema::document::OpenrpcDocument;
 use {
     crate::api::*,
     crate::config::Config,
     crate::validation::validate_pubkey,
-    crate::DasApiError,
     async_trait::async_trait,
     digital_asset_types::rpc::{response::AssetList, Asset, AssetProof, CompressedData},
     sea_orm::{DatabaseConnection, DbErr, SqlxPostgresConnector},
@@ -522,6 +523,45 @@ impl ApiContract for DasApi {
             .map_err(Into::into)
     }
 
+    async fn get_asset_signatures(
+        self: &DasApi,
+        payload: GetAssetSignatures,
+    ) -> Result<TransactionSignatureList, DasApiError> {
+        let GetAssetSignatures {
+            id,
+            limit,
+            page,
+            before,
+            after,
+            tree,
+            leaf_index,
+            cursor,
+            sort_direction,
+        } = payload;
+
+        if !((id.is_some() && tree.is_none() && leaf_index.is_none())
+            || (id.is_none() && tree.is_some() && leaf_index.is_some()))
+        {
+            return Err(DasApiError::ValidationError(
+                "Must provide either 'id' or both 'tree' and 'leafIndex'".to_string(),
+            ));
+        }
+        let id = validate_opt_pubkey(&id)?;
+        let tree = validate_opt_pubkey(&tree)?;
+
+        let page_options = self.validate_pagination(limit, page, &before, &after, &cursor, None)?;
+
+        get_asset_signatures(
+            &self.db_connection,
+            id,
+            tree,
+            leaf_index,
+            page_options,
+            sort_direction,
+        )
+        .await
+        .map_err(Into::into)
+    }
     async fn get_grouping(
         self: &DasApi,
         payload: GetGrouping,

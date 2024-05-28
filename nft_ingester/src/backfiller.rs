@@ -877,7 +877,7 @@ impl<'a, T: Messenger> Backfiller<'a, T> {
             .flatten();
         for slot in result_slots {
             let key = format!("block{}", slot);
-            let mut cached_block = self.cache.get(&key);
+            let mut cached_block = self.cache.get(&key).await;
             if cached_block.is_none() {
                 debug!("Fetching block {} from RPC", slot);
                 let block = EncodedConfirmedBlock::from(
@@ -904,7 +904,7 @@ impl<'a, T: Messenger> Backfiller<'a, T> {
                     )));
                 }
                 self.cache.wait().await?;
-                cached_block = self.cache.get(&key);
+                cached_block = self.cache.get(&key).await;
             }
             if cached_block.is_none() {
                 return Err(IngesterError::CacheStorageWriteError(format!(
