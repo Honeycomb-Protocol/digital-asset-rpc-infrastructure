@@ -3,7 +3,10 @@ use {
         account_compression::handle_account_compression_instruction,
         bubblegum::handle_bubblegum_instruction,
         error::{ProgramTransformerError, ProgramTransformerResult},
-        hpl_programs::{handle_hpl_character_manager_account, handle_hpl_hive_control_account},
+        hpl_programs::{
+            handle_hpl_character_manager_account, handle_hpl_hive_control_account,
+            handle_hpl_nectar_missions_account, handle_hpl_nectar_staking_account,
+        },
         mpl_core_program::handle_mpl_core_account,
         noop::handle_noop_instruction,
         token::handle_token_program_account,
@@ -15,7 +18,8 @@ use {
         programs::{
             account_compression::AccountCompressionParser, bubblegum::BubblegumParser,
             hpl_character_manager::HplCharacterManagerParser,
-            hpl_hive_control::HplHiveControlParser, mpl_core_program::MplCoreParser,
+            hpl_hive_control::HplHiveControlParser, hpl_nectar_missions::HplNectarMissionsParser,
+            hpl_nectar_staking::HplNectarStakingParser, mpl_core_program::MplCoreParser,
             noop::NoopParser, token_account::TokenAccountParser,
             token_metadata::TokenMetadataParser, ProgramParseResult,
         },
@@ -110,6 +114,8 @@ impl ProgramTransformer {
         let noop = NoopParser {};
         let hpl_character_manager = HplCharacterManagerParser {};
         let hpl_hive_control = HplHiveControlParser {};
+        let hpl_nectar_staking = HplNectarStakingParser {};
+        let hpl_nectar_missions = HplNectarMissionsParser {};
 
         parsers.insert(bgum.key(), Box::new(bgum));
         parsers.insert(token_metadata.key(), Box::new(token_metadata));
@@ -119,6 +125,8 @@ impl ProgramTransformer {
         parsers.insert(noop.key(), Box::new(noop));
         parsers.insert(hpl_character_manager.key(), Box::new(hpl_character_manager));
         parsers.insert(hpl_hive_control.key(), Box::new(hpl_hive_control));
+        parsers.insert(hpl_nectar_staking.key(), Box::new(hpl_nectar_staking));
+        parsers.insert(hpl_nectar_missions.key(), Box::new(hpl_nectar_missions));
         let hs = parsers.iter().fold(HashSet::new(), |mut acc, (k, _)| {
             acc.insert(*k);
             acc
@@ -307,6 +315,14 @@ impl ProgramTransformer {
                 }
                 ProgramParseResult::HplHiveControl(parsing_result) => {
                     handle_hpl_hive_control_account(account_info, parsing_result, &self.storage)
+                        .await
+                }
+                ProgramParseResult::HplNectarStaking(parsing_result) => {
+                    handle_hpl_nectar_staking_account(account_info, parsing_result, &self.storage)
+                        .await
+                }
+                ProgramParseResult::HplNectarMissions(parsing_result) => {
+                    handle_hpl_nectar_missions_account(account_info, parsing_result, &self.storage)
                         .await
                 }
                 _ => Err(ProgramTransformerError::NotImplemented),

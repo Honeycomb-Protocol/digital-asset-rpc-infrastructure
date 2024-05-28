@@ -20,6 +20,8 @@ pub enum HplCharacterManagerAccount {
     Uninitialized,
     Unknown,
     AssemblerConfig(accounts::AssemblerConfig),
+    CharacterModel(accounts::CharacterModel),
+    AssetCustody(accounts::AssetCustody),
 }
 
 impl ParseResult for HplCharacterManagerAccount {
@@ -68,6 +70,14 @@ impl ProgramParser for HplCharacterManagerParser {
                         .map_err(|_| BlockbusterError::DeserializationError)?,
                 )
             }
+            accounts::CharacterModel::DISCRIMINATOR => HplCharacterManagerAccount::CharacterModel(
+                accounts::CharacterModel::deserialize(&mut &account_data[8..])
+                    .map_err(|_| BlockbusterError::DeserializationError)?,
+            ),
+            accounts::AssetCustody::DISCRIMINATOR => HplCharacterManagerAccount::AssetCustody(
+                accounts::AssetCustody::deserialize(&mut &account_data[8..])
+                    .map_err(|_| BlockbusterError::DeserializationError)?,
+            ),
             _ => HplCharacterManagerAccount::Unknown,
         }))
     }
