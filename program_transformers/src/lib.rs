@@ -3,7 +3,7 @@ use {
         account_compression::handle_account_compression_instruction,
         bubblegum::handle_bubblegum_instruction,
         error::{ProgramTransformerError, ProgramTransformerResult},
-        hpl_programs::handle_hpl_character_manager_account,
+        hpl_programs::{handle_hpl_character_manager_account, handle_hpl_hive_control_account},
         mpl_core_program::handle_mpl_core_account,
         noop::handle_noop_instruction,
         token::handle_token_program_account,
@@ -14,7 +14,8 @@ use {
         program_handler::ProgramParser,
         programs::{
             account_compression::AccountCompressionParser, bubblegum::BubblegumParser,
-            hpl_character_manager::HplCharacterManagerParser, mpl_core_program::MplCoreParser,
+            hpl_character_manager::HplCharacterManagerParser,
+            hpl_hive_control::HplHiveControlParser, mpl_core_program::MplCoreParser,
             noop::NoopParser, token_account::TokenAccountParser,
             token_metadata::TokenMetadataParser, ProgramParseResult,
         },
@@ -108,6 +109,8 @@ impl ProgramTransformer {
         let account_compression = AccountCompressionParser {};
         let noop = NoopParser {};
         let hpl_character_manager = HplCharacterManagerParser {};
+        let hpl_hive_control = HplHiveControlParser {};
+
         parsers.insert(bgum.key(), Box::new(bgum));
         parsers.insert(token_metadata.key(), Box::new(token_metadata));
         parsers.insert(token.key(), Box::new(token));
@@ -115,6 +118,7 @@ impl ProgramTransformer {
         parsers.insert(account_compression.key(), Box::new(account_compression));
         parsers.insert(noop.key(), Box::new(noop));
         parsers.insert(hpl_character_manager.key(), Box::new(hpl_character_manager));
+        parsers.insert(hpl_hive_control.key(), Box::new(hpl_hive_control));
         let hs = parsers.iter().fold(HashSet::new(), |mut acc, (k, _)| {
             acc.insert(*k);
             acc
@@ -300,6 +304,10 @@ impl ProgramTransformer {
                         &self.storage,
                     )
                     .await
+                }
+                ProgramParseResult::HplHiveControl(parsing_result) => {
+                    handle_hpl_hive_control_account(account_info, parsing_result, &self.storage)
+                        .await
                 }
                 _ => Err(ProgramTransformerError::NotImplemented),
             }?;

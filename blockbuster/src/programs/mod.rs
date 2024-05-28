@@ -1,6 +1,7 @@
 use account_compression::AccountCompressionInstruction;
 use bubblegum::BubblegumInstruction;
 use hpl_character_manager::HplCharacterManagerAccount;
+use hpl_hive_control::HplHiveControlAccount;
 use mpl_core_program::MplCoreAccountState;
 use noop::NoopInstruction;
 use token_account::TokenProgramAccount;
@@ -10,6 +11,7 @@ use token_metadata::TokenMetadataAccountState;
 pub mod account_compression;
 pub mod bubblegum;
 pub mod hpl_character_manager;
+pub mod hpl_hive_control;
 pub mod mpl_core_program;
 pub mod noop;
 pub mod token_account;
@@ -39,5 +41,6 @@ pub enum ProgramParseResult<'a> {
     TokenExtensionsProgramAccount(&'a TokenExtensionsProgramAccount),
     AccountCompression(&'a AccountCompressionInstruction),
     Noop(&'a NoopInstruction),
+    HplHiveControl(&'a HplHiveControlAccount),
     HplCharacterManager(&'a HplCharacterManagerAccount),
 }

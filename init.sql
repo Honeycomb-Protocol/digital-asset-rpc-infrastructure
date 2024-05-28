@@ -354,12 +354,9 @@ create table compressed_data_changelog
     key                     text null,
     data                    jsonb not null,
     seq                     bigint not null,
-    slot                    bigint not null
-    created_at              timestamp with time zone default (now() at time zone 'utc'),
+    slot                    bigint not null,
+    created_at              timestamp with time zone default (now() at time zone 'utc')
 );
--- @@@@@@
-
-create index compressed_data_changelog on compressed_data_changelog (compressed_data_id);
 -- @@@@@@
 create index compressed_data_changelog_tree_key_seq on compressed_data_changelog (tree_id, key, seq);
 -- @@@@@@
