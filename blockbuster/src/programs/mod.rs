@@ -1,11 +1,15 @@
+use account_compression::AccountCompressionInstruction;
 use bubblegum::BubblegumInstruction;
 use mpl_core_program::MplCoreAccountState;
+use noop::NoopInstruction;
 use token_account::TokenProgramAccount;
 use token_extensions::TokenExtensionsProgramAccount;
 use token_metadata::TokenMetadataAccountState;
 
+pub mod account_compression;
 pub mod bubblegum;
 pub mod mpl_core_program;
+pub mod noop;
 pub mod token_account;
 pub mod token_extensions;
 pub mod token_metadata;
@@ -25,10 +29,12 @@ pub mod token_metadata;
 // Candy Machine V2 (`mpl-candy-machine`) parsing was removed at the same time as V3 because even
 // though it did not depend on the `mpl-candy-machine` crate, it was also not being used by DAS.
 pub enum ProgramParseResult<'a> {
+    Unknown,
     Bubblegum(&'a BubblegumInstruction),
     MplCore(&'a MplCoreAccountState),
     TokenMetadata(&'a TokenMetadataAccountState),
     TokenProgramAccount(&'a TokenProgramAccount),
     TokenExtensionsProgramAccount(&'a TokenExtensionsProgramAccount),
-    Unknown,
+    AccountCompression(&'a AccountCompressionInstruction),
+    Noop(&'a NoopInstruction),
 }

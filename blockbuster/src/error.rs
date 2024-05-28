@@ -11,6 +11,8 @@ pub enum BlockbusterError {
     DeserializationError,
     #[error("Missing Bubblegum event data")]
     MissingBubblegumEventData,
+    #[error("Missing SPL Account compression event data")]
+    MissingAccountCompressionEventData,
     #[error("Data length is invalid.")]
     InvalidDataLength,
     #[error("Unknown anchor account discriminator.")]
