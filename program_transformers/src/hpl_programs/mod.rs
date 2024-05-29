@@ -5,11 +5,13 @@ use sea_orm::{
 };
 
 mod hpl_character_manager;
+mod hpl_currency_manager;
 mod hpl_hive_control;
 mod hpl_nectar_missions;
 mod hpl_nectar_staking;
 
 pub use hpl_character_manager::handle_hpl_character_manager_account;
+pub use hpl_currency_manager::handle_hpl_currency_manager_account;
 pub use hpl_hive_control::handle_hpl_hive_control_account;
 pub use hpl_nectar_missions::handle_hpl_nectar_missions_account;
 pub use hpl_nectar_staking::handle_hpl_nectar_staking_account;
