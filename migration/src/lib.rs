@@ -44,6 +44,7 @@ mod m20240206_175504_create_acccounts_table;
 mod m20240313_120101_add_mpl_core_plugins_columns;
 mod m20240319_120101_add_mpl_core_enum_vals;
 mod m20240320_120101_add_mpl_core_info_items;
+mod m20240509_213421_add_character_history_table;
 mod m20240522_085331_create_compressed_data_changelog_table;
 
 pub mod model;
@@ -89,6 +90,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20231122_191039_create_merkle_tree_table::Migration),
             Box::new(m20231206_120101_remove_was_decompressed::Migration),
             Box::new(m20240206_175504_create_acccounts_table::Migration),
+            Box::new(m20240509_213421_add_character_history_table::Migration),
             Box::new(m20240522_085331_create_compressed_data_changelog_table::Migration),
             Box::new(m20240104_203133_add_cl_audits_v2::Migration),
             Box::new(m20240104_203328_remove_cl_audits::Migration),

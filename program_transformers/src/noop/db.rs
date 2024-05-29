@@ -1,12 +1,16 @@
 use crate::error::{ProgramTransformerError, ProgramTransformerResult};
 use anchor_lang::{AnchorDeserialize, AnchorSerialize};
-use digital_asset_types::dao::{compressed_data, compressed_data_changelog, merkle_tree};
+use digital_asset_types::dao::{
+    character_history, compressed_data, compressed_data_changelog, merkle_tree,
+};
 use hpl_toolkit::prelude::*;
-use log::{debug, info};
+use log::{debug, error, info};
 use sea_orm::{
     query::*, sea_query::OnConflict, ActiveValue::Set, ColumnTrait, DbBackend, EntityTrait,
 };
+use solana_sdk::pubkey::Pubkey;
 use spl_account_compression::events::ApplicationDataEventV1;
+use std::str::FromStr;
 
 async fn exec_query<'c, T: ConnectionTrait + TransactionTrait>(
     txn: &T,
@@ -158,14 +162,22 @@ async fn handle_full_leaf<'c, T: ConnectionTrait + TransactionTrait>(
     debug!("Find tree query executed successfully");
 
     let mut schema_validated: bool = false;
+    let mut program_id: Option<Pubkey> = None;
     if let Some(tree) = tree {
         debug!("Parsing tree data schema");
         let schema = Schema::deserialize(&mut &tree.data_schema[..]).map_err(|db_err| {
             ProgramTransformerError::CompressedDataParseError(db_err.to_string())
         })?;
 
+        if tree.program.is_none() {
+            return Err(ProgramTransformerError::CompressedDataParseError(format!(
+                "Tree program not found"
+            )));
+        }
+        program_id = Some(Pubkey::try_from(tree.program.unwrap()).unwrap());
         debug!("Parsed tree data schema");
         if !schema.validate(&mut data) {
+            error!("Schema value validation failed");
             return Err(ProgramTransformerError::CompressedDataParseError(format!(
                 "Schema value validation failed for data: {} with schema: {}",
                 data.to_string(),
@@ -184,13 +196,13 @@ async fn handle_full_leaf<'c, T: ConnectionTrait + TransactionTrait>(
     debug!("Serialized raw data");
 
     let item = compressed_data::ActiveModel {
-        id: Set(id),
+        id: Set(id.clone()),
         tree_id: Set(tree_id.to_vec()),
         leaf_idx: Set(leaf_idx),
         seq: Set(seq),
         schema_validated: Set(schema_validated),
         raw_data: Set(raw_data),
-        parsed_data: Set(data.into()),
+        parsed_data: Set(data.clone().into()),
         slot_updated: Set(slot),
         ..Default::default()
     };
@@ -212,7 +224,26 @@ async fn handle_full_leaf<'c, T: ConnectionTrait + TransactionTrait>(
             .to_owned(),
         )
         .build(DbBackend::Postgres);
-    exec_query(txn, query).await
+    exec_query(txn, query).await?;
+
+    if let Some(program_id) = program_id {
+        if program_id == Pubkey::from_str("ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg").unwrap() {
+            if let SchemaValue::Object(character) = data {
+                if let Some(kind_obj) = character.get(&"used_by".to_string()) {
+                    new_character_event(
+                        txn,
+                        id,
+                        kind_obj.clone(),
+                        ("NewCharacter").to_string(),
+                        slot as i64,
+                        // Some(false),
+                    )
+                    .await?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn handle_leaf_patch<'c, T: ConnectionTrait + TransactionTrait>(
@@ -235,9 +266,21 @@ async fn handle_leaf_patch<'c, T: ConnectionTrait + TransactionTrait>(
             "Could not find old data in db".to_string(),
         ));
     }
-
     let mut db_data: compressed_data::ActiveModel = found.unwrap().into();
     debug!("Found old_data {:?}", db_data);
+
+    let tree = merkle_tree::Entity::find_by_id(db_data.id.clone().unwrap())
+        .one(txn)
+        .await
+        .map_err(|db_err| ProgramTransformerError::StorageReadError(db_err.to_string()))?;
+
+    debug!("Find tree query executed successfully");
+
+    let mut program_id: Option<Pubkey> = None;
+    if let Some(tree) = tree {
+        program_id = Some(Pubkey::try_from(tree.program.unwrap()).unwrap());
+        debug!("Parsing tree data schema");
+    }
 
     debug!("Wrapped model into ActiveModel");
 
@@ -246,7 +289,27 @@ async fn handle_leaf_patch<'c, T: ConnectionTrait + TransactionTrait>(
     if let JsonValue::Object(object) = &mut parsed_data {
         if object.contains_key(&key) {
             debug!("Patching {}: {:?}", key, data.to_string());
-            object.insert(key.clone(), data.clone().into());
+            if key == "used_by".to_string() {
+                if let Some(program_id) = program_id {
+                    debug!("program_id {:?}", program_id);
+                    if program_id
+                        == Pubkey::from_str("ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg").unwrap()
+                    {
+                        if let Some(used_by) = object.get("used_by") {
+                            log_character_history(
+                                txn,
+                                id.clone(),
+                                used_by.clone().into(),
+                                data.clone(),
+                                slot as i64,
+                            )
+                            .await?;
+                        }
+                    }
+                }
+            }
+
+            object.insert(key, data.to_owned().into());
         }
     }
 
@@ -309,5 +372,76 @@ async fn handle_change_log<'c, T: ConnectionTrait + TransactionTrait>(
     };
 
     let query = compressed_data_changelog::Entity::insert(change_log).build(DbBackend::Postgres);
+    exec_query(txn, query).await
+}
+
+pub async fn log_character_history<T>(
+    txn: &T,
+    character_id: Vec<u8>,
+    pre_used_by: SchemaValue,
+    new_used_by: SchemaValue,
+    slot: i64,
+) -> Result<(), ProgramTransformerError>
+where
+    T: ConnectionTrait + TransactionTrait,
+{
+    debug!("pre_used by {:?}", pre_used_by.to_string());
+    debug!("new_used by {:?}", new_used_by.to_string());
+    let pre_used_by_kind = match pre_used_by {
+        SchemaValue::Enum(kind, _) => kind,
+        _ => unreachable!(),
+    };
+
+    let new_used_by_kind = match new_used_by.clone() {
+        SchemaValue::Enum(kind, _) => kind,
+        _ => unreachable!(),
+    };
+
+    let event = match (pre_used_by_kind.as_str(), new_used_by_kind.as_str()) {
+        ("Ejected", "None") => String::from("Wrapped"),
+        ("None", "Staking") => String::from("Staked"),
+        ("None", "Mission") => String::from("MissionParticipation"),
+        ("Staking", "None") => String::from("UnStaked"),
+        ("Staking", "Staking") => String::from("ClaimedStakingReward"),
+        ("Mission", "None") => String::from("RecallFromMission"),
+        ("Mission", "Mission") => String::from("ClaimedMissionReward"),
+        (_, "Ejected") => String::from("UnWrapped"),
+        (_, _) => unreachable!(),
+    };
+
+    debug!("Event {:?}", event);
+    debug!("pre_used_by_kind {:?}", pre_used_by_kind);
+    debug!("new_used_by_kind {:?}", new_used_by_kind);
+    debug!("Event Matched");
+
+    new_character_event(txn, character_id, new_used_by, event, slot as i64).await
+}
+
+pub async fn new_character_event<T>(
+    txn: &T,
+    character_id: Vec<u8>,
+    event_data: SchemaValue,
+    event: String,
+    slot: i64,
+    // fetch_history: Option<bool>,
+) -> Result<(), ProgramTransformerError>
+where
+    T: ConnectionTrait + TransactionTrait,
+{
+    let new_history = character_history::ActiveModel {
+        event: Set(event), //Set(("NewCharacter").to_string()),
+        event_data: Set(event_data.into()),
+        character_id: Set(character_id),
+        slot_updated: Set(slot),
+        ..Default::default()
+    };
+    let query = character_history::Entity::insert(new_history)
+        .on_conflict(
+            OnConflict::columns([character_history::Column::Id])
+                .update_columns([character_history::Column::CharacterId])
+                .to_owned(),
+        )
+        .build(DbBackend::Postgres);
+
     exec_query(txn, query).await
 }
