@@ -2,18 +2,18 @@
 pub struct Migration;
 use sea_orm_migration::{
     prelude::*,
-    sea_orm::{ConnectionTrait, DatabaseBackend, Statement},
+    // sea_orm::{ConnectionTrait, DatabaseBackend, Statement},
 };
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
-        .get_connection()
-        .execute(Statement::from_string(
-            DatabaseBackend::Postgres,
-            "CREATE INDEX IF NOT EXISTS character_history_character_id on character_history (character_id);".to_string(),
-        ))
-        .await?;
+        // manager
+        // .get_connection()
+        // .execute(Statement::from_string(
+        //     DatabaseBackend::Postgres,
+        //     "CREATE INDEX IF NOT EXISTS character_history_character_id on character_history (character_id);".to_string(),
+        // ))
+        // .await?;
         manager
             .create_table(
                 Table::create()
@@ -54,14 +54,14 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
-            .drop_index(
-                sea_query::Index::drop()
-                    .name("character_history_character_id")
-                    .table(CharacterHistory::Table)
-                    .to_owned(),
-            )
-            .await?;
+        // manager
+        //     .drop_index(
+        //         sea_query::Index::drop()
+        //             .name("character_history_character_id")
+        //             .table(CharacterHistory::Table)
+        //             .to_owned(),
+        //     )
+        //     .await?;
         manager
             .drop_table(Table::drop().table(CharacterHistory::Table).to_owned())
             .await

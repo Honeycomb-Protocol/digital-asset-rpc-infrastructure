@@ -23,8 +23,8 @@ pub struct Multiplier {
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
 pub enum MultiplierType {
-    StakeDuration { min_duration: u64 },
-    NFTCount { min_count: u64 },
-    Creator { creator: Pubkey },
-    Collection { collection: Pubkey },
+    StakeDuration(u64),
+    NFTCount(u64),
+    Creator(Pubkey),
+    Collection(Pubkey),
 }
