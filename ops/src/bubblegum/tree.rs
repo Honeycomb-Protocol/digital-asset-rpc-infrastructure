@@ -2,6 +2,7 @@ use anyhow::Result;
 use borsh::BorshDeserialize;
 use clap::Args;
 use das_core::{QueuePoolError, Rpc};
+use log::debug;
 use log::error;
 use sea_orm::{DatabaseConnection, DbBackend, FromQueryResult, Statement, Value};
 use solana_client::rpc_filter::{Memcmp, RpcFilterType};
@@ -14,7 +15,6 @@ use spl_account_compression::state::{
 use std::str::FromStr;
 use thiserror::Error as ThisError;
 use tokio::sync::mpsc::Sender;
-
 const GET_SIGNATURES_FOR_ADDRESS_LIMIT: usize = 1000;
 
 #[derive(Debug, Clone, Args)]
@@ -46,6 +46,8 @@ pub enum TreeErrorKind {
     TryFromPubkey,
     #[error("try from signature")]
     TryFromSignature,
+    #[error("Redis Pipe query error")]
+    RedisPipe,
 }
 
 const TREE_GAP_SQL: &str = r#"
@@ -201,7 +203,12 @@ pub struct TreeResponse {
 }
 
 impl TreeResponse {
-    pub fn try_from_rpc(pubkey: Pubkey, account: Account) -> Result<Self> {
+    pub async fn try_from_rpc(
+        client: &Rpc,
+        pubkey: Pubkey,
+        account: Account,
+        programs: &Vec<Pubkey>,
+    ) -> Result<Self> {
         let bytes = account.data.as_slice();
 
         let (header_bytes, rest) = bytes.split_at(CONCURRENT_MERKLE_TREE_HEADER_SIZE_V1);
@@ -214,9 +221,41 @@ impl TreeResponse {
         let seq_bytes = tree_bytes[0..8].try_into()?;
         let seq = u64::from_le_bytes(seq_bytes);
 
-        let (auth, _) = Pubkey::find_program_address(&[pubkey.as_ref()], &mpl_bubblegum::ID);
+        let (bgum_auth, _) = Pubkey::find_program_address(&[pubkey.as_ref()], &mpl_bubblegum::ID);
 
-        header.assert_valid_authority(&auth)?;
+        let mut auth_result = header.assert_valid_authority(&bgum_auth);
+
+        if auth_result.is_err() {
+            let (hc_vault, _) = Pubkey::find_program_address(
+                &[
+                    b"vault".as_ref(),
+                    blockbuster::programs::hpl_hive_control::hpl_hive_control().as_ref(),
+                ],
+                &blockbuster::programs::hpl_hive_control::hpl_hive_control(),
+            );
+            auth_result = header.assert_valid_authority(&hc_vault);
+        }
+
+        if programs.len() > 0 && auth_result.is_err() {
+            debug!("Checking tree authority owner for tree {:?}", pubkey);
+            header.assert_valid()?;
+            let mut pubkey_bytes = [0; 32];
+            pubkey_bytes.copy_from_slice(&header_bytes.to_vec()[10..42]);
+            let tree_authority = Pubkey::from(pubkey_bytes);
+            debug!("Tree authority {:?}", tree_authority);
+
+            let tree_authority_acc = client.get_account(&tree_authority).await?.value;
+            if let Some(tree_authority_acc) = tree_authority_acc {
+                if !programs.contains(&tree_authority_acc.owner) {
+                    auth_result?
+                }
+            } else {
+                auth_result?
+            }
+        } else {
+            debug!("Checking bgum as auth");
+            auth_result?
+        }
 
         let tree_header = header.try_into()?;
 
@@ -227,8 +266,11 @@ impl TreeResponse {
         })
     }
 
-    pub async fn all(client: &Rpc) -> Result<Vec<Self>, TreeErrorKind> {
-        Ok(client
+    pub async fn all(
+        client: &Rpc,
+        authority_programs: &Vec<Pubkey>,
+    ) -> Result<Vec<Self>, TreeErrorKind> {
+        let trees = client
             .get_program_accounts(
                 &id(),
                 Some(vec![RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
@@ -236,17 +278,38 @@ impl TreeResponse {
                     vec![1u8],
                 ))]),
             )
-            .await?
+            .await?;
+        debug!("Fetched trees from chain (before filter) {}", trees.len());
+
+        let trees =
+            futures::future::try_join_all(trees.into_iter().map(|(pubkey, account)| async move {
+                // Self::try_from_rpc(client, pubkey, account, Vec::new())
+                Ok::<Option<Self>, anyhow::Error>(
+                    match Self::try_from_rpc(client, pubkey, account, authority_programs).await {
+                        Ok(x) => Some(x),
+                        Err(err) => {
+                            debug!("{}", err);
+                            None
+                        }
+                    },
+                )
+            }))
+            .await
+            .map_err(|_| TreeErrorKind::SerializeTreeResponse)?
             .into_iter()
-            .filter_map(|(pubkey, account)| Self::try_from_rpc(pubkey, account).ok())
-            .collect())
+            .filter_map(|x| x)
+            .collect::<Vec<_>>();
+
+        debug!("Trees after filter {}", trees.len());
+
+        Ok(trees)
     }
 
-    pub async fn find(client: &Rpc, pubkeys: Vec<String>) -> Result<Vec<Self>, TreeErrorKind> {
-        let pubkeys: Vec<Pubkey> = pubkeys
-            .into_iter()
-            .map(|p| Pubkey::from_str(&p))
-            .collect::<Result<Vec<Pubkey>, _>>()?;
+    pub async fn find(
+        client: &Rpc,
+        pubkeys: Vec<Pubkey>,
+        authority_programs: &Vec<Pubkey>,
+    ) -> Result<Vec<Self>, TreeErrorKind> {
         let pubkey_batches = pubkeys.chunks(100);
         let pubkey_batches_count = pubkey_batches.len();
 
@@ -264,14 +327,14 @@ impl TreeResponse {
 
         let result = futures::future::try_join_all(gma_handles).await?;
 
-        let trees = result
-            .into_iter()
-            .flatten()
-            .filter_map(|(pubkey, account)| {
-                account.map(|account| Self::try_from_rpc(*pubkey, account))
-            })
-            .collect::<Result<Vec<TreeResponse>, _>>()
-            .map_err(|_| TreeErrorKind::SerializeTreeResponse)?;
+        let trees = futures::future::try_join_all(result.into_iter().flatten().filter_map(
+            |(pubkey, account)| {
+                account
+                    .map(|account| Self::try_from_rpc(client, *pubkey, account, authority_programs))
+            },
+        ))
+        .await
+        .map_err(|_| TreeErrorKind::SerializeTreeResponse)?;
 
         Ok(trees)
     }

@@ -1,13 +1,11 @@
-use anyhow::Result;
-
 use super::account_details::AccountDetails;
+use anyhow::Result;
 use clap::Parser;
-use das_core::{MetricsArgs, QueueArgs, QueuePool, Rpc, SolanaRpcArgs};
-use flatbuffers::FlatBufferBuilder;
-use plerkle_serialization::{
-    serializer::serialize_account, solana_geyser_plugin_interface_shims::ReplicaAccountInfoV2,
-};
+use das_core::{MetricsArgs, QueueArgs, Rpc, SolanaRpcArgs};
+use redis::Value as RedisValue;
 use solana_sdk::pubkey::Pubkey;
+use yellowstone_grpc_proto::geyser::{SubscribeUpdateAccount, SubscribeUpdateAccountInfo};
+use yellowstone_grpc_proto::prost::Message;
 
 #[derive(Debug, Parser, Clone)]
 pub struct Args {
@@ -28,8 +26,8 @@ pub struct Args {
     pub batch_size: usize,
 
     /// The public key of the program to backfill
-    #[clap(value_parser = parse_pubkey)]
-    pub program: Pubkey,
+    #[clap(env, value_parser = parse_pubkey, use_value_delimiter = true)]
+    pub programs: Vec<Pubkey>,
 }
 
 fn parse_pubkey(s: &str) -> Result<Pubkey, &'static str> {
@@ -38,44 +36,65 @@ fn parse_pubkey(s: &str) -> Result<Pubkey, &'static str> {
 
 pub async fn run(config: Args) -> Result<()> {
     let rpc = Rpc::from_config(config.solana);
-    let queue = QueuePool::try_from_config(config.queue).await?;
 
-    let accounts = rpc.get_program_accounts(&config.program, None).await?;
+    let client = redis::Client::open(config.queue.messenger_redis_url)?;
+    let mut connection = client.get_multiplexed_tokio_connection().await?;
+    let mut pipe = redis::pipe();
+    // let queue = QueuePool::try_from_config(config.queue).await?;
 
-    let accounts_chunks = accounts.chunks(config.batch_size);
+    for program in &config.programs {
+        let accounts = rpc.get_program_accounts(program, None).await?;
 
-    for batch in accounts_chunks {
-        let results = futures::future::try_join_all(
-            batch
-                .iter()
-                .map(|(pubkey, _account)| AccountDetails::fetch(&rpc, pubkey)),
-        )
-        .await?;
+        let accounts_chunks = accounts.chunks(config.batch_size);
 
-        for account_detail in results {
-            let AccountDetails {
-                account,
-                slot,
-                pubkey,
-            } = account_detail;
-            let builder = FlatBufferBuilder::new();
-            let account_info = ReplicaAccountInfoV2 {
-                pubkey: &pubkey.to_bytes(),
-                lamports: account.lamports,
-                owner: &account.owner.to_bytes(),
-                executable: account.executable,
-                rent_epoch: account.rent_epoch,
-                data: &account.data,
-                write_version: 0,
-                txn_signature: None,
-            };
+        for batch in accounts_chunks {
+            let results = futures::future::try_join_all(
+                batch
+                    .iter()
+                    .map(|(pubkey, _account)| AccountDetails::fetch(&rpc, pubkey)),
+            )
+            .await?;
 
-            let fbb = serialize_account(builder, &account_info, slot, false);
-            let bytes = fbb.finished_data();
+            for account_detail in results {
+                let AccountDetails {
+                    account: account_raw,
+                    slot,
+                    pubkey,
+                } = account_detail;
 
-            queue.push_account_backfill(bytes).await?;
+                let account: SubscribeUpdateAccount = SubscribeUpdateAccount {
+                    account: Some(SubscribeUpdateAccountInfo {
+                        pubkey: pubkey.to_bytes().to_vec(),
+                        lamports: account_raw.lamports,
+                        owner: account_raw.owner.to_bytes().to_vec(),
+                        executable: account_raw.executable,
+                        rent_epoch: account_raw.rent_epoch,
+                        data: account_raw.data,
+                        write_version: 0,                // UNKNOWN
+                        txn_signature: Some(Vec::new()), // Unknown
+                    }),
+                    slot,
+                    is_startup: false,
+                };
+
+                pipe.xadd_maxlen(
+                    &das_grpc_ingest::config::ConfigGrpcTransactions::default_stream(),
+                    redis::streams::StreamMaxlen::Approx(
+                        das_grpc_ingest::config::ConfigGrpcTransactions::default_stream_maxlen(),
+                    ),
+                    "*",
+                    &[(
+                        &das_grpc_ingest::config::ConfigGrpcTransactions::default_stream_data_key(),
+                        account.encode_to_vec(),
+                    )],
+                );
+            }
         }
     }
+
+    pipe.atomic()
+        .query_async::<_, RedisValue>(&mut connection)
+        .await?;
 
     Ok(())
 }

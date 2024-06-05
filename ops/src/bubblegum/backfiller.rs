@@ -1,22 +1,31 @@
 use super::tree::{TreeErrorKind, TreeGapFill, TreeGapModel, TreeResponse};
 use anyhow::Result;
+use base64::Engine;
 use cadence_macros::{statsd_count, statsd_time};
 use clap::Parser;
-use das_core::{
-    connect_db, setup_metrics, MetricsArgs, PoolArgs, QueueArgs, QueuePool, Rpc, SolanaRpcArgs,
-};
+use das_core::{connect_db, setup_metrics, MetricsArgs, PoolArgs, QueueArgs, Rpc, SolanaRpcArgs};
 use digital_asset_types::dao::cl_audits_v2;
-use flatbuffers::FlatBufferBuilder;
 use futures::{stream::FuturesUnordered, StreamExt};
 use indicatif::HumanDuration;
-use log::{error, info};
-use plerkle_serialization::serializer::seralize_encoded_transaction_with_status;
+use log::{debug, error, info};
+use redis::aio::MultiplexedConnection;
+use redis::Value as RedisValue;
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, SqlxPostgresConnector,
 };
-use solana_sdk::signature::Signature;
+use solana_sdk::{pubkey::Pubkey, signature::Signature};
+use solana_transaction_status::{
+    UiInnerInstructions, UiInstruction, UiLoadedAddresses, UiTransactionReturnData,
+    UiTransactionTokenBalance,
+};
 use std::time::Instant;
 use tokio::{sync::mpsc, task::JoinHandle};
+use yellowstone_grpc_proto::prelude::Message;
+use yellowstone_grpc_proto::{
+    geyser::{SubscribeUpdateTransaction, SubscribeUpdateTransactionInfo},
+    prelude::*,
+    prost::Message as OtherMessage,
+};
 
 #[derive(Debug, Parser, Clone)]
 pub struct Args {
@@ -41,8 +50,8 @@ pub struct Args {
     pub gap_worker_count: usize,
 
     /// The list of trees to crawl. If not specified, all trees will be crawled.
-    #[arg(long, env, use_value_delimiter = true)]
-    pub only_trees: Option<Vec<String>>,
+    #[arg(long, env, value_parser = parse_pubkey, use_value_delimiter = true)]
+    pub only_trees: Option<Vec<Pubkey>>,
 
     /// Database configuration
     #[clap(flatten)]
@@ -59,6 +68,14 @@ pub struct Args {
     /// Solana configuration
     #[clap(flatten)]
     pub solana: SolanaRpcArgs,
+
+    /// The public key of the program to backfill
+    #[arg(long, env, value_parser = parse_pubkey, use_value_delimiter = true)]
+    pub programs: Option<Vec<Pubkey>>,
+}
+
+fn parse_pubkey(s: &str) -> Result<Pubkey, &'static str> {
+    Pubkey::try_from(s).map_err(|_| "Failed to parse public key")
 }
 
 /// Runs the backfilling process for the tree crawler.
@@ -97,13 +114,14 @@ pub async fn run(config: Args) -> Result<()> {
     let transaction_solana_rpc = solana_rpc.clone();
     let gap_solana_rpc = solana_rpc.clone();
 
+    let client = redis::Client::open(config.queue.messenger_redis_url)?;
+    let connection = client.get_multiplexed_tokio_connection().await?;
+
     setup_metrics(config.metrics)?;
 
     let (sig_sender, mut sig_receiver) = mpsc::channel::<Signature>(config.signature_channel_size);
     let gap_sig_sender = sig_sender.clone();
     let (gap_sender, mut gap_receiver) = mpsc::channel::<TreeGapFill>(config.gap_channel_size);
-
-    let queue = QueuePool::try_from_config(config.queue).await?;
 
     let transaction_worker_count = config.transaction_worker_count;
 
@@ -116,9 +134,8 @@ pub async fn run(config: Args) -> Result<()> {
             }
 
             let solana_rpc = transaction_solana_rpc.clone();
-            let queue = queue.clone();
 
-            let handle = spawn_transaction_worker(solana_rpc, queue, signature);
+            let handle = spawn_transaction_worker(solana_rpc, connection.clone(), signature);
 
             handlers.push(handle);
         }
@@ -149,10 +166,14 @@ pub async fn run(config: Args) -> Result<()> {
 
     let started = Instant::now();
 
+    debug!("{:?}", config.programs);
+    let programs = config.programs.unwrap_or_default();
     let trees = if let Some(only_trees) = config.only_trees {
-        TreeResponse::find(&solana_rpc, only_trees).await?
+        debug!("Backfilling only {:?}", only_trees);
+        TreeResponse::find(&solana_rpc, only_trees, &programs).await?
     } else {
-        TreeResponse::all(&solana_rpc).await?
+        debug!("Backfilling all trees");
+        TreeResponse::all(&solana_rpc, &programs).await?
     };
 
     let tree_count = trees.len();
@@ -294,25 +315,211 @@ fn spawn_crawl_worker(
 
 async fn queue_transaction<'a>(
     client: Rpc,
-    queue: QueuePool,
+    mut connection: MultiplexedConnection,
     signature: Signature,
 ) -> Result<(), TreeErrorKind> {
-    let transaction = client.get_transaction(&signature).await?;
+    let transaction_raw: solana_transaction_status::EncodedConfirmedTransactionWithStatusMeta =
+        client.get_transaction(&signature).await?;
+    let decoded_tx = transaction_raw.transaction.transaction.decode().unwrap();
+    let signatures: Vec<Vec<u8>> = decoded_tx
+        .signatures
+        .iter()
+        .map(|signature| <Signature as AsRef<[u8]>>::as_ref(signature).into())
+        .collect();
 
-    let message = seralize_encoded_transaction_with_status(FlatBufferBuilder::new(), transaction)?;
+    let transaction = SubscribeUpdateTransaction {
+        transaction: Some(SubscribeUpdateTransactionInfo {
+            signature: signatures[0].clone(),
+            is_vote: false,
+            transaction: Some(Transaction {
+                signatures: signatures,
+                message: {
+                    let m = decoded_tx.message;
+                    Some(Message {
+                        header: {
+                            let h = m.header();
+                            Some(MessageHeader {
+                                num_readonly_signed_accounts: h.num_readonly_signed_accounts as u32,
+                                num_readonly_unsigned_accounts: h.num_readonly_unsigned_accounts
+                                    as u32,
+                                num_required_signatures: h.num_required_signatures as u32,
+                            })
+                        },
+                        recent_blockhash: m.recent_blockhash().to_bytes().to_vec(),
+                        account_keys: m
+                            .static_account_keys()
+                            .iter()
+                            .map(|k| k.to_bytes().to_vec())
+                            .collect(),
+                        versioned: true,
+                        address_table_lookups: m
+                            .address_table_lookups()
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|mat| MessageAddressTableLookup {
+                                readonly_indexes: mat.readonly_indexes.to_vec(),
+                                writable_indexes: mat.writable_indexes.to_vec(),
+                                account_key: mat.account_key.to_bytes().to_vec(),
+                            })
+                            .collect(),
+                        instructions: m
+                            .instructions()
+                            .into_iter()
+                            .map(|i| CompiledInstruction {
+                                data: i.data.to_vec(),
+                                accounts: i.accounts.to_vec(),
+                                program_id_index: i.program_id_index as u32,
+                            })
+                            .collect(),
+                    })
+                },
+            }),
+            meta: transaction_raw.transaction.meta.map(|meta| {
+                let inner_instructions = Into::<Option<Vec<UiInnerInstructions>>>::into(
+                    meta.inner_instructions,
+                )
+                .map(|inner_instructions| {
+                    inner_instructions
+                        .into_iter()
+                        .map(|ix| InnerInstructions {
+                            index: ix.index as u32,
+                            instructions: ix
+                                .instructions
+                                .into_iter()
+                                .map(|ix| match ix {
+                                    UiInstruction::Compiled(ix) => InnerInstruction {
+                                        program_id_index: ix.program_id_index as u32,
+                                        accounts: ix.accounts,
+                                        data: bs58::decode(ix.data).into_vec().unwrap(),
+                                        stack_height: ix.stack_height,
+                                    },
+                                    _ => todo!(),
+                                })
+                                .collect(),
+                        })
+                        .collect()
+                });
 
-    queue
-        .push_transaction_backfill(message.finished_data())
-        .await?;
+                let log_messages = Into::<Option<Vec<String>>>::into(meta.log_messages);
+
+                let pre_token_balances =
+                    Into::<Option<Vec<UiTransactionTokenBalance>>>::into(meta.pre_token_balances)
+                        .map(|b| {
+                            b.into_iter()
+                                .map(|b| TokenBalance {
+                                    account_index: b.account_index as u32,
+                                    mint: b.mint,
+                                    ui_token_amount: Some(UiTokenAmount {
+                                        ui_amount: b.ui_token_amount.ui_amount.unwrap_or_default(),
+                                        decimals: b.ui_token_amount.decimals as u32,
+                                        amount: b.ui_token_amount.amount,
+                                        ui_amount_string: b.ui_token_amount.ui_amount_string,
+                                    }),
+                                    owner: Into::<Option<String>>::into(b.owner)
+                                        .unwrap_or_default(),
+                                    program_id: Into::<Option<String>>::into(b.program_id)
+                                        .unwrap_or_default(),
+                                })
+                                .collect()
+                        });
+                let post_token_balances =
+                    Into::<Option<Vec<UiTransactionTokenBalance>>>::into(meta.post_token_balances)
+                        .map(|b| {
+                            b.into_iter()
+                                .map(|b| TokenBalance {
+                                    account_index: b.account_index as u32,
+                                    mint: b.mint,
+                                    ui_token_amount: Some(UiTokenAmount {
+                                        ui_amount: b.ui_token_amount.ui_amount.unwrap_or_default(),
+                                        decimals: b.ui_token_amount.decimals as u32,
+                                        amount: b.ui_token_amount.amount,
+                                        ui_amount_string: b.ui_token_amount.ui_amount_string,
+                                    }),
+                                    owner: Into::<Option<String>>::into(b.owner)
+                                        .unwrap_or_default(),
+                                    program_id: Into::<Option<String>>::into(b.program_id)
+                                        .unwrap_or_default(),
+                                })
+                                .collect()
+                        });
+
+                let (loaded_writable_addresses, loaded_readonly_addresses) =
+                    Into::<Option<UiLoadedAddresses>>::into(meta.loaded_addresses)
+                        .map(|x| {
+                            (
+                                x.writable
+                                    .into_iter()
+                                    .map(|a| bs58::decode(a).into_vec().unwrap())
+                                    .collect(),
+                                x.readonly
+                                    .into_iter()
+                                    .map(|a| bs58::decode(a).into_vec().unwrap())
+                                    .collect(),
+                            )
+                        })
+                        .unwrap_or((Vec::default(), Vec::default()));
+
+                let return_data = Into::<Option<UiTransactionReturnData>>::into(meta.return_data)
+                    .map(|r| ReturnData {
+                        data: base64::engine::general_purpose::STANDARD
+                            .decode(r.data.0)
+                            .unwrap(),
+                        program_id: bs58::decode(r.program_id).into_vec().unwrap(),
+                    });
+
+                TransactionStatusMeta {
+                    err: None,
+                    fee: meta.fee,
+                    pre_balances: meta.pre_balances,
+                    post_balances: meta.post_balances,
+                    inner_instructions_none: inner_instructions.is_none(),
+                    inner_instructions: inner_instructions.unwrap_or_default(),
+                    log_messages_none: log_messages.is_none(),
+                    log_messages: log_messages.unwrap_or_default(),
+                    pre_token_balances: pre_token_balances.unwrap_or_default(),
+                    post_token_balances: post_token_balances.unwrap_or_default(),
+                    rewards: Vec::new(),
+                    loaded_writable_addresses,
+                    loaded_readonly_addresses,
+                    return_data_none: return_data.is_none(),
+                    return_data: return_data,
+                    compute_units_consumed: meta.compute_units_consumed.into(),
+                }
+            }),
+            index: 0,
+        }),
+        slot: transaction_raw.slot,
+    };
+
+    let mut pipe = redis::pipe();
+    pipe.xadd_maxlen(
+        &das_grpc_ingest::config::ConfigGrpcAccounts::default_stream(),
+        redis::streams::StreamMaxlen::Approx(
+            das_grpc_ingest::config::ConfigGrpcAccounts::default_stream_maxlen(),
+        ),
+        "*",
+        &[(
+            &das_grpc_ingest::config::ConfigGrpcAccounts::default_stream_data_key(),
+            transaction.encode_to_vec(),
+        )],
+    );
+    pipe.atomic()
+        .query_async::<_, RedisValue>(&mut connection)
+        .await
+        .map_err(|_| TreeErrorKind::RedisPipe)?;
 
     Ok(())
 }
 
-fn spawn_transaction_worker(client: Rpc, queue: QueuePool, signature: Signature) -> JoinHandle<()> {
+fn spawn_transaction_worker(
+    client: Rpc,
+    connection: MultiplexedConnection,
+    signature: Signature,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let timing = Instant::now();
 
-        if let Err(e) = queue_transaction(client, queue, signature).await {
+        if let Err(e) = queue_transaction(client, connection, signature).await {
             error!("queue transaction: {:?}", e);
 
             statsd_count!("transaction.failed", 1);
