@@ -1,0 +1,54 @@
+prometheus: 127.0.0.1:8873
+geyser_endpoints:
+  - http://solana:10000
+x_token: null
+commitment: processed
+accounts:
+  stream: ACCOUNTS
+  stream_maxlen: 100_000_000
+  stream_data_key: data
+  filter:
+    owner:
+      - "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+      - "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+      - "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+      - "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+      - "BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY"
+      - "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
+      - "EtXbhgWbWEWamyoNbSRyN5qFXjFbw8utJDHvBkQKXLSL"
+      - "HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm"
+      - "ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg"
+      - "CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4"
+      - "Assetw8uxLogzVXic5P8wGYpVdesS1oZHfSnBFHAu42s"
+      - "B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h"
+      - "MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6"
+      - "HuntaX1CmUt5EByyFPE8pMf13SpvezybmMTtjmpmGmfj"
+      - "Gui1D2TnmAqakeHfp4NNZCcpqawNVgmJxT9JBUqXgyoD"
+      - "8fTwUdyGfDAcmdu8X4uWb2vBHzseKGXnxZUpZ2D94iit"
+transactions:
+  stream: TRANSACTIONS
+  stream_maxlen: 10_000_000
+  stream_data_key: data
+  filter:
+    account_include:
+      - "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+      - "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+      - "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+      - "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+      - "BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY"
+      - "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
+      - "EtXbhgWbWEWamyoNbSRyN5qFXjFbw8utJDHvBkQKXLSL"
+      - "HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm"
+      - "ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg"
+      - "CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4"
+      - "Assetw8uxLogzVXic5P8wGYpVdesS1oZHfSnBFHAu42s"
+      - "B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h"
+      - "MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6"
+      - "HuntaX1CmUt5EByyFPE8pMf13SpvezybmMTtjmpmGmfj"
+      - "Gui1D2TnmAqakeHfp4NNZCcpqawNVgmJxT9JBUqXgyoD"
+      - "8fTwUdyGfDAcmdu8X4uWb2vBHzseKGXnxZUpZ2D94iit"
+redis:
+  url: redis://redis:6379
+  pipeline_max_size: 10
+  pipeline_max_idle_ms: 10
+  max_xadd_in_process: 100

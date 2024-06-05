@@ -4,15 +4,12 @@ members = [
   "core",
   "das_api",
   "digital_asset_types",
-  "integration_tests",
   "metaplex-rpc-proxy",
   "migration",
-  "nft_ingester",
   "ops",
   "grpc-ingest",
   "program_transformers",
   "tools/acc_forwarder",
-  "tools/bgtask_creator",
   "tools/fetch_trees",
   "tools/load_generation",
   "tools/tree-status",
@@ -79,7 +76,6 @@ mime_guess = "2.0.4"
 mpl-bubblegum = "1.2.0"
 mpl-core = { version = "0.5.0", features = ["serde"] }
 mpl-token-metadata = "4.1.1"
-nft_ingester = { path = "nft_ingester" }
 num-derive = "0.3.3"
 num-traits = "0.2.15"
 once_cell = "1.19.0"

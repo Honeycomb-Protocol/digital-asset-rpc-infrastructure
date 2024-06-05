@@ -15,37 +15,63 @@ commitment: finalized
 EOL
 
 mkdir plugin-config && true
-if [[ ! -f /plugin-config/accountsdb-plugin-config.json ]]
+if [[ ! -f /plugin-config/grpc-plugin-config.json ]]
 then
-cat << EOL > /plugin-config/accountsdb-plugin-config.json
+cat << EOL > /plugin-config/grpc-plugin-config.json
     {
         "libpath": "/plugin/plugin.so",
-        "accounts_selector" : {
-            "owners" : [
-                "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s",
-                "GRoLLMza82AiYN7W9S9KCCtCyyPRAQP2ifBy4v4D5RMD",
-                "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-                "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-                "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
-                "BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY",
-                "cndy3Z4yapfJBmL3ShUp5exZKqR3z33thTzeNMm2gRZ",
-                "CndyV3LdqHUfDLmE5naZjVN8rBZz4tqhdefbAnjHG3JR",
-                "Guard1JwRhJkVH6XZhzoYxeBVQe872VH6QggF4BWmS9g"
-            ]
+        "log": {
+            "level": "info"
         },
-        "transaction_selector" : {
-            "mentions" : [
-                "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s",
-                "GRoLLMza82AiYN7W9S9KCCtCyyPRAQP2ifBy4v4D5RMD",
-                "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-                "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-                "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
-                "BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY",
-                "cndy3Z4yapfJBmL3ShUp5exZKqR3z33thTzeNMm2gRZ",
-                "CndyV3LdqHUfDLmE5naZjVN8rBZz4tqhdefbAnjHG3JR",
-                "Guard1JwRhJkVH6XZhzoYxeBVQe872VH6QggF4BWmS9g"
-            ]
-        }
+        "grpc": {
+            "address": "0.0.0.0:10000",
+            "max_decoding_message_size": "4_194_304",
+            "snapshot_plugin_channel_capacity": null,
+            "snapshot_client_channel_capacity": "50_000_000",
+            "channel_capacity": "100_000",
+            "unary_concurrency_limit": 100,
+            "unary_disabled": false,
+            "filters": {
+                "accounts": {
+                    "max": 1,
+                    "any": false,
+                    "owner_reject": [
+                        "11111111111111111111111111111111"
+                    ]
+                },
+                "slots": {
+                    "max": 1
+                },
+                "transactions": {
+                    "max": 1,
+                    "any": false
+                },
+                "transactions_status": {
+                    "max": 1
+                },
+                "blocks": {
+                    "max": 1,
+                    "account_include_max": 10,
+                    "account_include_any": false,
+                    "account_include_reject": [
+                        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+                    ],
+                    "include_transactions": true,
+                    "include_accounts": false,
+                    "include_entries": false
+                },
+                "blocks_meta": {
+                    "max": 1
+                },
+                "entry": {
+                    "max": 1
+                }
+            }
+        },
+        "prometheus": {
+            "address": "0.0.0.0:8999"
+        },
+        "block_fail_action": "log"
     }
 EOL
 fi
@@ -67,17 +93,17 @@ mkdir -p "$dataDir" "$ledgerDir"
 # ls -la /so/
 args=(
   --config config.yaml
-#   --gossip-host 145.40.103.167
   --ledger $ledgerDir
   --limit-ledger-size 1200000
   --rpc-port 8899
-  --geyser-plugin-config /plugin-config/accountsdb-plugin-config.json
+  --geyser-plugin-config /plugin-config/grpc-plugin-config.json
   --clone EtXbhgWbWEWamyoNbSRyN5qFXjFbw8utJDHvBkQKXLSL --clone UgfWEZpFdY1hPhEnuYHe24u9xR74xTSvT1uZxxiwymM # Test Hive Control
-  --clone HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm --clone 5ZJG4CchgDXQ9LVS5a7pmib1VS69t8SSsV5riexibwTk # Hive Control
-  --clone ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg --clone U7w6LJRtG4jvUQv4WjTinkHnv9UAfHjBiVdr2HERiX2 # Character Manager
-  --clone CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4 --clone DcYW5MQscHQE4PmFpbohn9JJqqN3vyYau83eXTx8yAcJ # Currency Manager
-  --clone Assetw8uxLogzVXic5P8wGYpVdesS1oZHfSnBFHAu42s --clone FRAhFGRAa93JwJQuHJ7HngtA1Nfp6JmSRqpGHjxtLsGK # Resource Manager
-  --clone MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6 --clone GerKtMVEu66ZCha6oaab8iGrBHc5Q6VYNRCNMgXn1WGm # Nectar Staking
+#   --clone HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm --clone 5ZJG4CchgDXQ9LVS5a7pmib1VS69t8SSsV5riexibwTk # Hive Control
+#   --clone ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg --clone U7w6LJRtG4jvUQv4WjTinkHnv9UAfHjBiVdr2HERiX2 # Character Manager
+#   --clone CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4 --clone DcYW5MQscHQE4PmFpbohn9JJqqN3vyYau83eXTx8yAcJ # Currency Manager
+#   --clone Assetw8uxLogzVXic5P8wGYpVdesS1oZHfSnBFHAu42s --clone FRAhFGRAa93JwJQuHJ7HngtA1Nfp6JmSRqpGHjxtLsGK # Resource Manager
+#   --clone MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6 --clone GerKtMVEu66ZCha6oaab8iGrBHc5Q6VYNRCNMgXn1WGm # Nectar Staking
+#   --clone B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h --clone DhZGz5bbfvqeMn9tb6FbH4Q1jpcb1K9REon5Ps92GuMV # Resource Manager TEST
   --clone Ha71K2v3q9wL3hDLbGx5mRnAXd6CdgzNx5GJHDbWvPRg --clone G5s6HRnHwRTGcE1cXAZeeCsFeurVGuW2Wqhr7UBiDZWQ
   --clone 4AZpzJtYZCu9yWrnK1D5W23VXHLgN1GPkL8h8CfaGBTW --clone 86h623JGQvvJAsPG7meWsUjFW6hBe5tLwqNPoa9baUfC
   --clone BNdAHQMniLicundk1jo4qKWyNr9C8bK7oUrzgSwoSGmZ --clone FQErtH1zXPuHRxEwamXpWG711CVhqQS3Epsv4jao4Kn1
@@ -90,7 +116,7 @@ args=(
 # args+=("--url devnet")
 
 # shellcheck disable=SC2086
-# cat /plugin-config/accountsdb-plugin-config.json
+# cat /plugin-config/grpc-plugin-config.json
 # ls -la /so/
 
 

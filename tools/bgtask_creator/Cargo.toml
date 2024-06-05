@@ -12,7 +12,7 @@ digital_asset_types = { workspace = true, features = ["json_types", "sql_types"]
 futures = { workspace = true }
 lazy_static = { workspace = true }
 log = { workspace = true }
-nft_ingester = { workspace = true }
+nft_ingester = { path = "../nft_ingester" }
 prometheus = { workspace = true }
 sea-orm = { workspace = true, features = ["macros", "runtime-tokio-rustls", "sqlx-postgres", "with-chrono", "mock"] }
 sea-query = { workspace = true, features = ["postgres-array"] }

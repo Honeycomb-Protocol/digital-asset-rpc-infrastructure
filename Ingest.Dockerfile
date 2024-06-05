@@ -9,8 +9,8 @@ ENV TZ=Etc/UTC \
 RUN groupadd $APP_USER \
     && useradd -g $APP_USER $APP_USER \
     && mkdir -p ${APP}
-COPY --from=files /das/nft_ingester ${APP}
+COPY --from=files /das/das-grpc-ingest ${APP}
 RUN chown -R $APP_USER:$APP_USER ${APP}
 USER $APP_USER
 WORKDIR ${APP}
-CMD /usr/src/app/nft_ingester
+ENTRYPOINT [ "/usr/src/app/das-grpc-ingest" ] 

@@ -17,7 +17,7 @@ itertools = { workspace = true }
 log = { workspace = true }
 migration = { workspace = true }
 mpl-token-metadata = { workspace = true }
-nft_ingester = { workspace = true }
+nft_ingester = { path = "../nft_ingester" }
 once_cell = { workspace = true }
 plerkle_serialization = { workspace = true }
 program_transformers = { workspace = true }

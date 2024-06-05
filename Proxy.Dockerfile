@@ -2,18 +2,19 @@ FROM rust:1.75-bullseye AS builder
 RUN cargo install wasm-pack
 
 RUN mkdir /rust
-COPY ./Cargo.toml /rust
-COPY ./core /rust/core
-COPY ./das_api /rust/das_api
-COPY ./digital_asset_types /rust/digital_asset_types
-COPY ./integration_tests /rust/integration_tests
-COPY ./metaplex-rpc-proxy /rust/metaplex-rpc-proxy
-COPY ./migration /rust/migration
-COPY ./nft_ingester /rust/nft_ingester
-COPY ./ops /rust/ops
-COPY ./program_transformers /rust/program_transformers
-COPY ./tools /rust/tools
-COPY ./blockbuster /rust/blockbuster
+COPY Cargo.toml /rust
+COPY Cargo.lock /rust
+COPY .git /rust/.git
+COPY core /rust/core
+COPY das_api /rust/das_api
+COPY digital_asset_types /rust/digital_asset_types
+COPY metaplex-rpc-proxy /rust/metaplex-rpc-proxy
+COPY migration /rust/migration
+COPY grpc-ingest /rust/grpc-ingest
+COPY ops /rust/ops
+COPY program_transformers /rust/program_transformers
+COPY tools /rust/tools
+COPY blockbuster rust/blockbuster
 
 WORKDIR /rust/metaplex-rpc-proxy
 RUN mkdir /rust/wasm-out/

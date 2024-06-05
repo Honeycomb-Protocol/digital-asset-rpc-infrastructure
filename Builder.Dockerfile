@@ -6,13 +6,13 @@ RUN mkdir /rust
 RUN mkdir /rust/bins
 COPY Cargo.toml /rust
 COPY Cargo.lock /rust
+COPY .git /rust/.git
 COPY core /rust/core
 COPY das_api /rust/das_api
 COPY digital_asset_types /rust/digital_asset_types
-COPY integration_tests /rust/integration_tests
 COPY metaplex-rpc-proxy /rust/metaplex-rpc-proxy
 COPY migration /rust/migration
-COPY nft_ingester /rust/nft_ingester
+COPY grpc-ingest /rust/grpc-ingest
 COPY ops /rust/ops
 COPY program_transformers /rust/program_transformers
 COPY tools /rust/tools

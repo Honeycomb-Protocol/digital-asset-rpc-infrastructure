@@ -186,6 +186,8 @@ impl IndexablePrograms for HoneycombPrograms {
         self.programs
             .push(pubkey!("Assetw8uxLogzVXic5P8wGYpVdesS1oZHfSnBFHAu42s")); // Resource Manager
         self.programs
+            .push(pubkey!("B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h")); // Resource Manager TEST
+        self.programs
             .push(pubkey!("ATQfyuSouoFHW393YFYeojfBcsPD6KpM4cVCzSwkguT2")); // Test Resource Manager
         self.programs
             .push(pubkey!("CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4")); // Currency
