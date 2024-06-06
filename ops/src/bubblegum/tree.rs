@@ -7,6 +7,7 @@ use log::error;
 use sea_orm::{DatabaseConnection, DbBackend, FromQueryResult, Statement, Value};
 use solana_client::rpc_filter::{Memcmp, RpcFilterType};
 use solana_client::rpc_response::RpcConfirmedTransactionStatusWithSignature;
+use solana_sdk::pubkey;
 use solana_sdk::{account::Account, pubkey::Pubkey, signature::Signature};
 use spl_account_compression::id;
 use spl_account_compression::state::{
@@ -221,13 +222,7 @@ impl TreeResponse {
 
         let seq_bytes = tree_bytes[0..8].try_into()?;
         let seq = u64::from_le_bytes(seq_bytes);
-        let (hc_vault, _) = Pubkey::find_program_address(
-            &[
-                b"vault".as_ref(),
-                blockbuster::programs::hpl_hive_control::hpl_hive_control().as_ref(),
-            ],
-            &blockbuster::programs::hpl_hive_control::hpl_hive_control(),
-        );
+        let hc_vault = pubkey!("DvgYMZV4EvTcNER75gJv29Go7ghByhFPCKiGAxpzytFs");
 
         debug!("Checking hc_vault as auth");
         let mut auth_result = header.assert_valid_authority(&hc_vault);
