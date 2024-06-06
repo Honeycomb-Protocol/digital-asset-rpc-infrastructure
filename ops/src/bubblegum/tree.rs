@@ -208,6 +208,7 @@ impl TreeResponse {
         pubkey: Pubkey,
         account: Account,
         programs: &Vec<Pubkey>,
+        ignore_bgum: bool,
     ) -> Result<Self> {
         let bytes = account.data.as_slice();
 
@@ -220,20 +221,22 @@ impl TreeResponse {
 
         let seq_bytes = tree_bytes[0..8].try_into()?;
         let seq = u64::from_le_bytes(seq_bytes);
+        let (hc_vault, _) = Pubkey::find_program_address(
+            &[
+                b"vault".as_ref(),
+                blockbuster::programs::hpl_hive_control::hpl_hive_control().as_ref(),
+            ],
+            &blockbuster::programs::hpl_hive_control::hpl_hive_control(),
+        );
 
-        let (bgum_auth, _) = Pubkey::find_program_address(&[pubkey.as_ref()], &mpl_bubblegum::ID);
+        debug!("Checking hc_vault as auth");
+        let mut auth_result = header.assert_valid_authority(&hc_vault);
 
-        let mut auth_result = header.assert_valid_authority(&bgum_auth);
-
-        if auth_result.is_err() {
-            let (hc_vault, _) = Pubkey::find_program_address(
-                &[
-                    b"vault".as_ref(),
-                    blockbuster::programs::hpl_hive_control::hpl_hive_control().as_ref(),
-                ],
-                &blockbuster::programs::hpl_hive_control::hpl_hive_control(),
-            );
-            auth_result = header.assert_valid_authority(&hc_vault);
+        if auth_result.is_err() && !ignore_bgum {
+            debug!("Checking bgum as auth");
+            let (bgum_auth, _) =
+                Pubkey::find_program_address(&[pubkey.as_ref()], &mpl_bubblegum::ID);
+            auth_result = header.assert_valid_authority(&bgum_auth);
         }
 
         if programs.len() > 0 && auth_result.is_err() {
@@ -253,7 +256,6 @@ impl TreeResponse {
                 auth_result?
             }
         } else {
-            debug!("Checking bgum as auth");
             auth_result?
         }
 
@@ -269,6 +271,7 @@ impl TreeResponse {
     pub async fn all(
         client: &Rpc,
         authority_programs: &Vec<Pubkey>,
+        ignore_bgum: bool,
     ) -> Result<Vec<Self>, TreeErrorKind> {
         let trees = client
             .get_program_accounts(
@@ -281,11 +284,19 @@ impl TreeResponse {
             .await?;
         debug!("Fetched trees from chain (before filter) {}", trees.len());
 
-        let trees =
+        let trees: Vec<TreeResponse> =
             futures::future::try_join_all(trees.into_iter().map(|(pubkey, account)| async move {
                 // Self::try_from_rpc(client, pubkey, account, Vec::new())
                 Ok::<Option<Self>, anyhow::Error>(
-                    match Self::try_from_rpc(client, pubkey, account, authority_programs).await {
+                    match Self::try_from_rpc(
+                        client,
+                        pubkey,
+                        account,
+                        authority_programs,
+                        ignore_bgum,
+                    )
+                    .await
+                    {
                         Ok(x) => Some(x),
                         Err(err) => {
                             debug!("{}", err);
@@ -329,8 +340,9 @@ impl TreeResponse {
 
         let trees = futures::future::try_join_all(result.into_iter().flatten().filter_map(
             |(pubkey, account)| {
-                account
-                    .map(|account| Self::try_from_rpc(client, *pubkey, account, authority_programs))
+                account.map(|account| {
+                    Self::try_from_rpc(client, *pubkey, account, authority_programs, false)
+                })
             },
         ))
         .await

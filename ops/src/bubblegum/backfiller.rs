@@ -49,6 +49,10 @@ pub struct Args {
     #[arg(long, env, default_value = "25")]
     pub gap_worker_count: usize,
 
+    /// The number of gap workers.
+    #[arg(long, env, default_value = "false")]
+    pub ignore_bgum: bool,
+
     /// The list of trees to crawl. If not specified, all trees will be crawled.
     #[arg(long, env, value_parser = parse_pubkey, use_value_delimiter = true)]
     pub only_trees: Option<Vec<Pubkey>>,
@@ -173,7 +177,7 @@ pub async fn run(config: Args) -> Result<()> {
         TreeResponse::find(&solana_rpc, only_trees, &programs).await?
     } else {
         debug!("Backfilling all trees");
-        TreeResponse::all(&solana_rpc, &programs).await?
+        TreeResponse::all(&solana_rpc, &programs, config.ignore_bgum).await?
     };
 
     let tree_count = trees.len();
