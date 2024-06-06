@@ -5,6 +5,7 @@ use hpl_currency_manager::HplCurrencyManagerAccount;
 use hpl_hive_control::HplHiveControlAccount;
 use hpl_nectar_missions::HplNectarMissionsAccount;
 use hpl_nectar_staking::HplNectarStakingAccount;
+use hpl_resource_manager::HplResourceManagerAccount;
 use mpl_core_program::MplCoreAccountState;
 use noop::NoopInstruction;
 use token_account::TokenProgramAccount;
@@ -18,6 +19,7 @@ pub mod hpl_currency_manager;
 pub mod hpl_hive_control;
 pub mod hpl_nectar_missions;
 pub mod hpl_nectar_staking;
+pub mod hpl_resource_manager;
 pub mod mpl_core_program;
 pub mod noop;
 pub mod token_account;
@@ -50,6 +52,7 @@ pub enum ProgramParseResult<'a> {
     HplHiveControl(&'a HplHiveControlAccount),
     HplCharacterManager(&'a HplCharacterManagerAccount),
     HplCurrencyManager(&'a HplCurrencyManagerAccount),
+    HplResourceManager(&'a HplResourceManagerAccount),
     HplNectarMissions(&'a HplNectarMissionsAccount),
     HplNectarStaking(&'a HplNectarStakingAccount),
 }
