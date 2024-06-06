@@ -78,13 +78,13 @@ pub async fn run(config: Args) -> Result<()> {
                 };
 
                 pipe.xadd_maxlen(
-                    &das_grpc_ingest::config::ConfigGrpcTransactions::default_stream(),
+                    &das_grpc_ingest::config::ConfigGrpcAccounts::default_stream(),
                     redis::streams::StreamMaxlen::Approx(
-                        das_grpc_ingest::config::ConfigGrpcTransactions::default_stream_maxlen(),
+                        das_grpc_ingest::config::ConfigGrpcAccounts::default_stream_maxlen(),
                     ),
                     "*",
                     &[(
-                        &das_grpc_ingest::config::ConfigGrpcTransactions::default_stream_data_key(),
+                        &das_grpc_ingest::config::ConfigGrpcAccounts::default_stream_data_key(),
                         account.encode_to_vec(),
                     )],
                 );
