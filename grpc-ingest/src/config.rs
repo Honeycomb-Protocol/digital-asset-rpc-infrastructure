@@ -179,6 +179,11 @@ pub struct ConfigIngester {
     pub postgres: ConfigIngesterPostgres,
     pub program_transformer: ConfigIngesterProgramTransformer,
     pub download_metadata: ConfigIngesterDownloadMetadata,
+    #[serde(
+        default = "ConfigIngester::default_inactivity_timeout",
+        deserialize_with = "deserialize_usize_str"
+    )]
+    pub inactivity_timeout_sec: usize,
 }
 
 impl ConfigIngester {
@@ -186,6 +191,9 @@ impl ConfigIngester {
         if self.postgres.max_connections < self.program_transformer.max_tasks_in_process {
             warn!("`postgres.max_connections` should be bigger than `program_transformer.max_tasks_in_process` otherwise unresolved lock is possible");
         }
+    }
+    pub fn default_inactivity_timeout() -> usize {
+        0
     }
 }
 

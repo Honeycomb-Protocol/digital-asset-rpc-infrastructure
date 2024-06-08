@@ -1,4 +1,4 @@
-use super::tree::{TreeErrorKind, TreeGapFill, TreeGapModel, TreeResponse};
+use super::tree::{SigIndex, TreeErrorKind, TreeGapFill, TreeGapModel, TreeResponse};
 use anyhow::Result;
 use base64::Engine;
 use cadence_macros::{statsd_count, statsd_time};
@@ -123,7 +123,7 @@ pub async fn run(config: Args) -> Result<()> {
 
     setup_metrics(config.metrics)?;
 
-    let (sig_sender, mut sig_receiver) = mpsc::channel::<Signature>(config.signature_channel_size);
+    let (sig_sender, mut sig_receiver) = mpsc::channel::<SigIndex>(config.signature_channel_size);
     let gap_sig_sender = sig_sender.clone();
     let (gap_sender, mut gap_receiver) = mpsc::channel::<TreeGapFill>(config.gap_channel_size);
 
@@ -191,7 +191,7 @@ pub async fn run(config: Args) -> Result<()> {
     let tree_crawler_count = config.tree_crawler_count;
     let mut crawl_handles = FuturesUnordered::new();
 
-    for tree in trees {
+    for (index, tree) in trees.into_iter().enumerate() {
         if crawl_handles.len() >= tree_crawler_count {
             crawl_handles.next().await;
         }
@@ -200,7 +200,7 @@ pub async fn run(config: Args) -> Result<()> {
         let pool = pool.clone();
         let conn = SqlxPostgresConnector::from_sqlx_postgres_pool(pool);
 
-        let handle = spawn_gap_worker(conn, sender, tree);
+        let handle = spawn_gap_worker(conn, sender, tree, index);
 
         crawl_handles.push(handle);
     }
@@ -231,6 +231,7 @@ fn spawn_gap_worker(
     conn: DatabaseConnection,
     sender: mpsc::Sender<TreeGapFill>,
     tree: TreeResponse,
+    tree_index: usize,
 ) -> JoinHandle<Result<(), anyhow::Error>> {
     tokio::spawn(async move {
         let timing = Instant::now();
@@ -259,13 +260,23 @@ fn spawn_gap_worker(
                 "tree {} has known highest seq {} filling tree from {}",
                 tree.pubkey, upper_seq.seq, signature
             );
-            gaps.push(TreeGapFill::new(tree.pubkey, None, Some(signature)));
+            gaps.push(TreeGapFill::new_with_index(
+                tree.pubkey,
+                None,
+                Some(signature),
+                tree_index,
+            ));
         } else if tree.seq > 0 {
             info!(
                 "tree {} has no known highest seq but the actual seq is {} filling whole tree",
                 tree.pubkey, tree.seq
             );
-            gaps.push(TreeGapFill::new(tree.pubkey, None, None));
+            gaps.push(TreeGapFill::new_with_index(
+                tree.pubkey,
+                None,
+                None,
+                tree_index,
+            ));
         }
 
         if let Some(lower_seq) = lower_known_seq.filter(|seq| seq.seq > 1) {
@@ -276,7 +287,12 @@ fn spawn_gap_worker(
                 tree.pubkey, lower_seq.seq, signature
             );
 
-            gaps.push(TreeGapFill::new(tree.pubkey, Some(signature), None));
+            gaps.push(TreeGapFill::new_with_index(
+                tree.pubkey,
+                Some(signature),
+                None,
+                tree_index,
+            ));
         }
 
         let gap_count = gaps.len();
@@ -299,7 +315,7 @@ fn spawn_gap_worker(
 
 fn spawn_crawl_worker(
     client: Rpc,
-    sender: mpsc::Sender<Signature>,
+    sender: mpsc::Sender<SigIndex>,
     gap: TreeGapFill,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -320,7 +336,7 @@ fn spawn_crawl_worker(
 async fn queue_transaction<'a>(
     client: Rpc,
     mut connection: MultiplexedConnection,
-    signature: Signature,
+    (signature, tree_index, index): SigIndex,
 ) -> Result<(), TreeErrorKind> {
     let transaction_raw: solana_transaction_status::EncodedConfirmedTransactionWithStatusMeta =
         client.get_transaction(&signature).await?;
@@ -330,10 +346,11 @@ async fn queue_transaction<'a>(
         .iter()
         .map(|signature| <Signature as AsRef<[u8]>>::as_ref(signature).into())
         .collect();
-
+    let signature = signatures[0].clone();
+    // let signature_str = bs58::encode(signature.clone()).into_string();
     let transaction = SubscribeUpdateTransaction {
         transaction: Some(SubscribeUpdateTransactionInfo {
-            signature: signatures[0].clone(),
+            signature,
             is_vote: false,
             transaction: Some(Transaction {
                 signatures: signatures,
@@ -497,11 +514,17 @@ async fn queue_transaction<'a>(
 
     let mut pipe = redis::pipe();
     pipe.xadd_maxlen(
-        &das_grpc_ingest::config::ConfigGrpcTransactions::default_stream(),
+        // &das_grpc_ingest::config::ConfigGrpcTransactions::default_stream(),
+        "TXN_FILL",
         redis::streams::StreamMaxlen::Approx(
             das_grpc_ingest::config::ConfigGrpcTransactions::default_stream_maxlen(),
         ),
-        "*",
+        format!(
+            "{}-{}",
+            transaction_raw.block_time.unwrap() as u64 * 1000 + transaction_raw.slot % 10, // Making slot usnique for that timestamp in order to maintain order
+            tree_index * 10000 + index // just to make sure there is no collide between signature index because of multiple trees doing txns at the same time
+                                       // signature_str
+        ), // Custom id to retain order of txns
         &[(
             &das_grpc_ingest::config::ConfigGrpcTransactions::default_stream_data_key(),
             transaction.encode_to_vec(),
@@ -518,7 +541,7 @@ async fn queue_transaction<'a>(
 fn spawn_transaction_worker(
     client: Rpc,
     connection: MultiplexedConnection,
-    signature: Signature,
+    signature: SigIndex,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let timing = Instant::now();

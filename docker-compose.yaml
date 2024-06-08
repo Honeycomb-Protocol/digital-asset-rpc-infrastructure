@@ -10,35 +10,42 @@ services:
       context: .
       dockerfile: Ops.Dockerfile
     depends_on:
+      - builder
       - redis
       - solana
     restart: always
     environment:
       RUST_LOG: debug
       RUST_BACKTRACE: 1
-    deploy:
-      restart_policy:
-        delay: 2m
-        # monitor: 1m
-    command: account program HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm,ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg,CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4,RSCR7UoY65mDMK8z2eCBvFmj4HSepGEY9ZjdCTiUDUA,B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h,MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6,HuntaX1CmUt5EByyFPE8pMf13SpvezybmMTtjmpmGmfj,Gui1D2TnmAqakeHfp4NNZCcpqawNVgmJxT9JBUqXgyoD --messenger-redis-url redis://redis:6379 --solana-rpc-url http://solana:8899
+    command:
+      - /bin/sh
+      - -c
+      - |
+        /usr/src/app/das-ops account program HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm,ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg,CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4,RSCR7UoY65mDMK8z2eCBvFmj4HSepGEY9ZjdCTiUDUA,B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h,MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6,HuntaX1CmUt5EByyFPE8pMf13SpvezybmMTtjmpmGmfj,Gui1D2TnmAqakeHfp4NNZCcpqawNVgmJxT9JBUqXgyoD --messenger-redis-url redis://redis:6379 --solana-rpc-url http://solana:8899
+        sleep 2m
   transactions-backfiller:
     build:
       context: .
       dockerfile: Ops.Dockerfile
     depends_on:
+      - builder
       - db
       - migrator
       - redis
       - solana
     restart: always
+    volumes:
+      - ./solana-test-validator-geyser-config/config-ingester-backfill.yml:/config.yml
     environment:
       RUST_LOG: debug
       RUST_BACKTRACE: 1
     deploy:
-      restart_policy:
-        delay: 2m
-        # monitor: 1m
-    command: bubblegum backfill --programs HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm,ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg,CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4,RSCR7UoY65mDMK8z2eCBvFmj4HSepGEY9ZjdCTiUDUA,B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h,MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6,HuntaX1CmUt5EByyFPE8pMf13SpvezybmMTtjmpmGmfj,Gui1D2TnmAqakeHfp4NNZCcpqawNVgmJxT9JBUqXgyoD --database-url postgres://solana:solana@db/solana --messenger-redis-url redis://redis:6379 --solana-rpc-url http://solana:8899
+    command:
+      - /bin/sh
+      - -c
+      - |
+        /usr/src/app/das-ops bubblegum backfill --programs HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm,ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg,CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4,RSCR7UoY65mDMK8z2eCBvFmj4HSepGEY9ZjdCTiUDUA,B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h,MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6,HuntaX1CmUt5EByyFPE8pMf13SpvezybmMTtjmpmGmfj,Gui1D2TnmAqakeHfp4NNZCcpqawNVgmJxT9JBUqXgyoD --database-url postgres://solana:solana@db/solana --messenger-redis-url redis://redis:6379 --solana-rpc-url http://solana:8899
+        CARGO_PKG_NAME=backfill-ingester /usr/src/app/das-grpc-ingest --config /config.yml ingester
 
   migrator:
     depends_on:

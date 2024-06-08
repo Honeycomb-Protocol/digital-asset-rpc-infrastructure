@@ -17,6 +17,7 @@ use {
         future::{pending, BoxFuture, FusedFuture, FutureExt},
         stream::StreamExt,
     },
+    log::debug,
     program_transformers::{
         error::ProgramTransformerError, DownloadMetadataInfo, DownloadMetadataNotifier,
         ProgramTransformer,
@@ -36,12 +37,23 @@ use {
     },
     tokio::{
         task::JoinSet,
-        time::{sleep, Duration},
+        time::{sleep, sleep_until, Duration},
     },
     tracing::warn,
 };
 
 pub async fn run(config: ConfigIngester) -> anyhow::Result<()> {
+    // Define a duration of inactivity after which the loop should shutdown
+    let inactivity_timeout = if config.inactivity_timeout_sec > 0 {
+        Some(Duration::from_secs(config.inactivity_timeout_sec as u64))
+    } else {
+        None
+    };
+    debug!(
+        "Inactivity: inactivity_timeout_sec: {:?}",
+        config.inactivity_timeout_sec
+    );
+    debug!("Inactivity: inactivity_timeout: {:?}", inactivity_timeout);
     // connect to Redis
     let client = redis::Client::open(config.redis.url.clone())?;
     let connection = client.get_multiplexed_tokio_connection().await?;
@@ -96,7 +108,22 @@ pub async fn run(config: ConfigIngester) -> anyhow::Result<()> {
 
     // read and process messages in the loop
     let mut shutdown = create_shutdown()?;
+    let mut last_activity = tokio::time::Instant::now();
     loop {
+        // Check for inactivity and shutdown if necessary
+        let inactivity_timeout_fut = if let Some(inactivity_timeout) = inactivity_timeout {
+            let timespent = tokio::time::Instant::now() - last_activity;
+            debug!(
+                "Inactivity: Timespent {:?}/{:?}",
+                timespent, inactivity_timeout
+            );
+            if timespent >= inactivity_timeout {
+                break Ok(());
+            }
+            sleep_until(last_activity + inactivity_timeout).boxed()
+        } else {
+            pending().boxed()
+        };
         pt_tasks_len.store(pt_tasks.len(), Ordering::Relaxed);
 
         let redis_messages_recv = if pt_tasks.len() == pt_max_tasks_in_process {
@@ -122,7 +149,16 @@ pub async fn run(config: ConfigIngester) -> anyhow::Result<()> {
             },
             result = &mut redis_tasks_fut => break result,
             msg = redis_messages_recv => match msg {
-                Some(msg) => msg,
+                Some(msg) => {
+                    if inactivity_timeout.is_some() {
+                        last_activity = tokio::time::Instant::now();
+                        debug!(
+                            "Inactivity: setting {:?}",
+                            last_activity
+                        );
+                    }
+                    msg
+                },
                 None => break Ok(()),
             },
             result = pt_tasks_next => {
@@ -130,6 +166,11 @@ pub async fn run(config: ConfigIngester) -> anyhow::Result<()> {
                     result??;
                 }
                 continue;
+            },
+            _ = inactivity_timeout_fut => {
+                // Timeout occurred, handle inactivity
+                debug!("Inactivity timeout reached, shutting down...");
+                break Ok(());
             }
         };
 
