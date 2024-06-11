@@ -119,7 +119,6 @@ impl ProgramTransformer {
         let hpl_character_manager = HplCharacterManagerParser {};
         let hpl_currency_manager = HplCurrencyManagerParser {};
         let hpl_hive_control = HplHiveControlParser {};
-        let hpl_resource_manager = HplResourceManagerParser {};
         let hpl_nectar_staking = HplNectarStakingParser {};
         let hpl_nectar_missions = HplNectarMissionsParser {};
         let hpl_resource_manager = HplResourceManagerParser {};
