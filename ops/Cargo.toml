@@ -31,6 +31,7 @@ log = { workspace = true }
 mpl-bubblegum = { workspace = true }
 plerkle_messenger = { workspace = true }
 plerkle_serialization = { workspace = true }
+program_transformers = { workspace = true }
 redis = { workspace = true, features = ["tokio-comp", "tokio-native-tls-comp"] }
 sea-orm = { workspace = true }
 solana-account-decoder = { workspace = true }
@@ -38,6 +39,7 @@ solana-client = { workspace = true }
 solana-sdk = { workspace = true }
 solana-transaction-status = { workspace = true }
 spl-account-compression = { workspace = true }
+sqlx = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 yellowstone-grpc-proto = { workspace = true }

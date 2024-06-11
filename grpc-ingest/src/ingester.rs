@@ -264,7 +264,7 @@ pub async fn run(config: ConfigIngester) -> anyhow::Result<()> {
     }
 }
 
-fn create_download_metadata_notifier(
+pub fn create_download_metadata_notifier(
     pgpool: PgPool,
     config: ConfigIngesterDownloadMetadata,
 ) -> anyhow::Result<DownloadMetadataNotifier> {

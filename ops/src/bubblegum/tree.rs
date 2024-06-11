@@ -18,8 +18,6 @@ use thiserror::Error as ThisError;
 use tokio::sync::mpsc::Sender;
 const GET_SIGNATURES_FOR_ADDRESS_LIMIT: usize = 1000;
 
-pub type SigIndex = (Signature, usize, usize);
-
 #[derive(Debug, Clone, Args)]
 pub struct ConfigBackfiller {
     /// Solana RPC URL
@@ -49,8 +47,6 @@ pub enum TreeErrorKind {
     TryFromPubkey,
     #[error("try from signature")]
     TryFromSignature,
-    #[error("Redis Pipe query error")]
-    RedisPipe,
 }
 
 const TREE_GAP_SQL: &str = r#"
@@ -133,33 +129,18 @@ pub struct TreeGapFill {
     tree: Pubkey,
     before: Option<Signature>,
     until: Option<Signature>,
-    initial_index: usize,
 }
 
 impl TreeGapFill {
-    pub fn new_with_index(
-        tree: Pubkey,
-        before: Option<Signature>,
-        until: Option<Signature>,
-        index: usize,
-    ) -> Self {
-        Self {
-            tree,
-            before,
-            until,
-            initial_index: index,
-        }
-    }
     pub fn new(tree: Pubkey, before: Option<Signature>, until: Option<Signature>) -> Self {
         Self {
             tree,
             before,
             until,
-            initial_index: 0,
         }
     }
 
-    pub async fn crawl(&self, client: Rpc, sender: Sender<SigIndex>) -> Result<()> {
+    pub async fn crawl(&self, client: Rpc, sender: Sender<Signature>) -> Result<()> {
         let mut before = self.before;
 
         loop {
@@ -173,10 +154,10 @@ impl TreeGapFill {
                 .filter(|transaction| transaction.err.is_none())
                 .collect::<Vec<RpcConfirmedTransactionStatusWithSignature>>();
 
-            for (index, sig) in successful_transactions.iter().enumerate() {
+            for sig in successful_transactions.iter() {
                 let sig = Signature::from_str(&sig.signature)?;
 
-                sender.send((sig, self.initial_index, index)).await?;
+                sender.send(sig).await?;
 
                 before = Some(sig);
             }

@@ -1,31 +1,24 @@
-use super::tree::{SigIndex, TreeErrorKind, TreeGapFill, TreeGapModel, TreeResponse};
+use super::tree::{TreeErrorKind, TreeGapFill, TreeGapModel, TreeResponse};
 use anyhow::Result;
-use base64::Engine;
 use cadence_macros::{statsd_count, statsd_time};
 use clap::Parser;
 use das_core::{connect_db, setup_metrics, MetricsArgs, PoolArgs, QueueArgs, Rpc, SolanaRpcArgs};
+use das_grpc_ingest::create_download_metadata_notifier;
 use digital_asset_types::dao::cl_audits_v2;
 use futures::{stream::FuturesUnordered, StreamExt};
 use indicatif::HumanDuration;
 use log::{debug, error, info};
-use redis::aio::MultiplexedConnection;
-use redis::Value as RedisValue;
-use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, SqlxPostgresConnector,
-};
+use program_transformers::{ProgramTransformer, TransactionInfo};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, SqlxPostgresConnector};
+use solana_sdk::instruction::CompiledInstruction;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use solana_transaction_status::{
-    UiInnerInstructions, UiInstruction, UiLoadedAddresses, UiTransactionReturnData,
-    UiTransactionTokenBalance,
+    InnerInstruction, InnerInstructions, UiInnerInstructions, UiInstruction,
 };
+use sqlx::PgPool;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::{sync::mpsc, task::JoinHandle};
-use yellowstone_grpc_proto::prelude::Message;
-use yellowstone_grpc_proto::{
-    geyser::{SubscribeUpdateTransaction, SubscribeUpdateTransactionInfo},
-    prelude::*,
-    prost::Message as OtherMessage,
-};
 
 #[derive(Debug, Parser, Clone)]
 pub struct Args {
@@ -111,63 +104,52 @@ fn parse_pubkey(s: &str) -> Result<Pubkey, &'static str> {
 ///
 /// This function can return errors related to database connectivity, RPC failures,
 /// or issues with spawning and managing worker tasks.
+
 pub async fn run(config: Args) -> Result<()> {
+    // Config
     let pool = connect_db(config.database).await?;
-
     let solana_rpc = Rpc::from_config(config.solana);
-    let transaction_solana_rpc = solana_rpc.clone();
-    let gap_solana_rpc = solana_rpc.clone();
-
-    let client = redis::Client::open(config.queue.messenger_redis_url)?;
-    let connection = client.get_multiplexed_tokio_connection().await?;
 
     setup_metrics(config.metrics)?;
 
-    let (sig_sender, mut sig_receiver) = mpsc::channel::<SigIndex>(config.signature_channel_size);
-    let gap_sig_sender = sig_sender.clone();
-    let (gap_sender, mut gap_receiver) = mpsc::channel::<TreeGapFill>(config.gap_channel_size);
+    let program_transformer = Arc::new(ProgramTransformer::new(
+        pool.clone(),
+        create_download_metadata_notifier(
+            pool.clone(),
+            das_grpc_ingest::config::ConfigIngesterDownloadMetadata { max_attempts: 3 },
+        )?,
+        true,
+    ));
 
-    let transaction_worker_count = config.transaction_worker_count;
-
-    let transaction_worker_manager = tokio::spawn(async move {
+    // Tree Worker
+    let tree_solana_rpc = solana_rpc.clone();
+    let (tree_sender, mut tree_reciever) = mpsc::channel::<TreeResponse>(config.gap_channel_size);
+    let tree_worker_count = 10;
+    let tree_worker_manager = tokio::spawn(async move {
+        let program_transformer = Arc::clone(&program_transformer);
         let mut handlers = FuturesUnordered::new();
 
-        while let Some(signature) = sig_receiver.recv().await {
-            if handlers.len() >= transaction_worker_count {
+        while let Some(tree) = tree_reciever.recv().await {
+            if handlers.len() >= tree_worker_count {
                 handlers.next().await;
             }
-
-            let solana_rpc = transaction_solana_rpc.clone();
-
-            let handle = spawn_transaction_worker(solana_rpc, connection.clone(), signature);
-
+            let pool = pool.clone();
+            let solana_rpc = tree_solana_rpc.clone();
+            let handle = spawn_tree_worker(
+                pool,
+                solana_rpc,
+                program_transformer.clone(),
+                config.signature_channel_size,
+                config.transaction_worker_count,
+                tree,
+            );
             handlers.push(handle);
         }
 
-        futures::future::join_all(handlers).await;
+        futures::future::join_all(handlers).await
     });
 
-    let gap_worker_count = config.gap_worker_count;
-
-    let gap_worker_manager = tokio::spawn(async move {
-        let mut handlers = FuturesUnordered::new();
-
-        while let Some(gap) = gap_receiver.recv().await {
-            if handlers.len() >= gap_worker_count {
-                handlers.next().await;
-            }
-
-            let client = gap_solana_rpc.clone();
-            let sender = gap_sig_sender.clone();
-
-            let handle = spawn_crawl_worker(client, sender, gap);
-
-            handlers.push(handle);
-        }
-
-        futures::future::join_all(handlers).await;
-    });
-
+    // Start crawling trees
     let started = Instant::now();
 
     debug!("{:?}", config.programs);
@@ -181,6 +163,7 @@ pub async fn run(config: Args) -> Result<()> {
     };
 
     let tree_count = trees.len();
+    let mut tree_errored: usize = 0;
 
     info!(
         "fetched {} trees in {}",
@@ -188,38 +171,22 @@ pub async fn run(config: Args) -> Result<()> {
         HumanDuration(started.elapsed())
     );
 
-    let tree_crawler_count = config.tree_crawler_count;
-    let mut crawl_handles = FuturesUnordered::new();
-
-    for (index, tree) in trees.into_iter().enumerate() {
-        if crawl_handles.len() >= tree_crawler_count {
-            crawl_handles.next().await;
+    for tree in trees {
+        let tree_id = tree.pubkey.to_string();
+        match tree_sender.send(tree).await {
+            Ok(_) => debug!("Sent tree {} to worker", tree_id),
+            Err(e) => {
+                tree_errored += 1;
+                error!("While sending tree {} to worker: {:?}", tree_id, e)
+            }
         }
-
-        let sender = gap_sender.clone();
-        let pool = pool.clone();
-        let conn = SqlxPostgresConnector::from_sqlx_postgres_pool(pool);
-
-        let handle = spawn_gap_worker(conn, sender, tree, index);
-
-        crawl_handles.push(handle);
     }
+    drop(tree_sender);
 
-    futures::future::try_join_all(crawl_handles).await?;
-    drop(gap_sender);
-    info!("crawled all trees");
-
-    gap_worker_manager.await?;
-    drop(sig_sender);
-    info!("all gaps processed");
-
-    transaction_worker_manager.await?;
-    info!("all transactions queued");
-
-    statsd_time!("job.completed", started.elapsed());
-
+    tree_worker_manager.await?;
     info!(
-        "crawled {} trees in {}",
+        "crawled {}/{} trees in {}",
+        tree_count - tree_errored,
         tree_count,
         HumanDuration(started.elapsed())
     );
@@ -227,333 +194,190 @@ pub async fn run(config: Args) -> Result<()> {
     Ok(())
 }
 
-fn spawn_gap_worker(
-    conn: DatabaseConnection,
-    sender: mpsc::Sender<TreeGapFill>,
+fn spawn_tree_worker(
+    pool: PgPool,
+    client: Rpc,
+    program_transformer: Arc<ProgramTransformer>,
+    signature_channel_size: usize,
+    transaction_worker_count: usize,
     tree: TreeResponse,
-    tree_index: usize,
 ) -> JoinHandle<Result<(), anyhow::Error>> {
     tokio::spawn(async move {
-        let timing = Instant::now();
+        // Specific Transaction worker for this tree
+        let transaction_solana_rpc = client.clone();
+        let (sig_sender, mut sig_receiver) = mpsc::channel::<Signature>(signature_channel_size);
+        let transaction_worker_manager = tokio::spawn(async move {
+            let mut handlers = FuturesUnordered::new();
 
-        let mut gaps = TreeGapModel::find(&conn, tree.pubkey)
-            .await?
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<Vec<_>, _>>()?;
+            while let Some(signature) = sig_receiver.recv().await {
+                if handlers.len() >= transaction_worker_count {
+                    handlers.next().await;
+                }
 
-        let upper_known_seq = cl_audits_v2::Entity::find()
-            .filter(cl_audits_v2::Column::Tree.eq(tree.pubkey.as_ref().to_vec()))
-            .order_by_desc(cl_audits_v2::Column::Seq)
-            .one(&conn)
-            .await?;
+                let solana_rpc = transaction_solana_rpc.clone();
 
-        let lower_known_seq = cl_audits_v2::Entity::find()
-            .filter(cl_audits_v2::Column::Tree.eq(tree.pubkey.as_ref().to_vec()))
-            .order_by_asc(cl_audits_v2::Column::Seq)
-            .one(&conn)
-            .await?;
+                let handle = spawn_transaction_worker(solana_rpc, signature);
 
-        if let Some(upper_seq) = upper_known_seq {
-            let signature = Signature::try_from(upper_seq.tx.as_ref())?;
-            info!(
-                "tree {} has known highest seq {} filling tree from {}",
-                tree.pubkey, upper_seq.seq, signature
-            );
-            gaps.push(TreeGapFill::new_with_index(
-                tree.pubkey,
-                None,
-                Some(signature),
-                tree_index,
-            ));
-        } else if tree.seq > 0 {
-            info!(
-                "tree {} has no known highest seq but the actual seq is {} filling whole tree",
-                tree.pubkey, tree.seq
-            );
-            gaps.push(TreeGapFill::new_with_index(
-                tree.pubkey,
-                None,
-                None,
-                tree_index,
-            ));
-        }
+                handlers.push(handle);
+            }
 
-        if let Some(lower_seq) = lower_known_seq.filter(|seq| seq.seq > 1) {
-            let signature = Signature::try_from(lower_seq.tx.as_ref())?;
+            futures::future::join_all(handlers).await
+        });
 
-            info!(
-                "tree {} has known lowest seq {} filling tree starting at {}",
-                tree.pubkey, lower_seq.seq, signature
-            );
+        let gap_worker_sig_sender = sig_sender.clone();
+        let gap_worker_manager = tokio::spawn(async move {
+            let client = client.clone();
+            let sig_sender = gap_worker_sig_sender.clone();
+            let timing = Instant::now();
 
-            gaps.push(TreeGapFill::new_with_index(
-                tree.pubkey,
-                Some(signature),
-                None,
-                tree_index,
-            ));
-        }
+            let conn = SqlxPostgresConnector::from_sqlx_postgres_pool(pool);
 
-        let gap_count = gaps.len();
+            let mut gaps = TreeGapModel::find(&conn, tree.pubkey)
+                .await?
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<Vec<_>, _>>()?;
 
-        for gap in gaps {
-            if let Err(e) = sender.send(gap).await {
-                statsd_count!("gap.failed", 1);
-                error!("send gap: {:?}", e);
+            let upper_known_seq = cl_audits_v2::Entity::find()
+                .filter(cl_audits_v2::Column::Tree.eq(tree.pubkey.as_ref().to_vec()))
+                .order_by_desc(cl_audits_v2::Column::Seq)
+                .one(&conn)
+                .await?;
+
+            let lower_known_seq = cl_audits_v2::Entity::find()
+                .filter(cl_audits_v2::Column::Tree.eq(tree.pubkey.as_ref().to_vec()))
+                .order_by_asc(cl_audits_v2::Column::Seq)
+                .one(&conn)
+                .await?;
+
+            if let Some(upper_seq) = upper_known_seq {
+                let signature = Signature::try_from(upper_seq.tx.as_ref())?;
+                info!(
+                    "tree {} has known highest seq {} filling tree from {}",
+                    tree.pubkey, upper_seq.seq, signature
+                );
+                gaps.push(TreeGapFill::new(tree.pubkey, None, Some(signature)));
+            } else if tree.seq > 0 {
+                info!(
+                    "tree {} has no known highest seq but the actual seq is {} filling whole tree",
+                    tree.pubkey, tree.seq
+                );
+                gaps.push(TreeGapFill::new(tree.pubkey, None, None));
+            }
+
+            if let Some(lower_seq) = lower_known_seq.filter(|seq| seq.seq > 1) {
+                let signature = Signature::try_from(lower_seq.tx.as_ref())?;
+
+                info!(
+                    "tree {} has known lowest seq {} filling tree starting at {}",
+                    tree.pubkey, lower_seq.seq, signature
+                );
+
+                gaps.push(TreeGapFill::new(tree.pubkey, Some(signature), None));
+            }
+
+            let gap_count = gaps.len();
+
+            for gap in gaps {
+                if let Err(e) = gap.crawl(client.clone(), sig_sender.clone()).await {
+                    error!("tree transaction: {:?}", e);
+
+                    statsd_count!("gap.failed", 1);
+                } else {
+                    statsd_count!("gap.succeeded", 1);
+                }
+
+                statsd_time!("gap.queued", timing.elapsed());
+            }
+
+            info!("crawling tree {} with {} gaps", tree.pubkey, gap_count);
+
+            statsd_count!("tree.succeeded", 1);
+            statsd_time!("tree.crawled", timing.elapsed());
+
+            Ok::<(), anyhow::Error>(())
+        });
+        drop(sig_sender);
+        gap_worker_manager.await??;
+
+        let transactions = transaction_worker_manager.await?;
+
+        for transaction in transactions {
+            if let Ok(Some(transaction)) = transaction {
+                program_transformer.handle_transaction(&transaction).await?;
             }
         }
 
-        info!("crawling tree {} with {} gaps", tree.pubkey, gap_count);
-
-        statsd_count!("tree.succeeded", 1);
-        statsd_time!("tree.crawled", timing.elapsed());
-
-        Ok::<(), anyhow::Error>(())
+        Ok(())
     })
 }
 
-fn spawn_crawl_worker(
+async fn fetch_and_parse_transaction<'a>(
     client: Rpc,
-    sender: mpsc::Sender<SigIndex>,
-    gap: TreeGapFill,
-) -> JoinHandle<()> {
-    tokio::spawn(async move {
-        let timing = Instant::now();
-
-        if let Err(e) = gap.crawl(client, sender).await {
-            error!("tree transaction: {:?}", e);
-
-            statsd_count!("gap.failed", 1);
-        } else {
-            statsd_count!("gap.succeeded", 1);
-        }
-
-        statsd_time!("gap.queued", timing.elapsed());
-    })
-}
-
-async fn queue_transaction<'a>(
-    client: Rpc,
-    mut connection: MultiplexedConnection,
-    (signature, tree_index, index): SigIndex,
-) -> Result<(), TreeErrorKind> {
+    signature: Signature,
+) -> Result<TransactionInfo, TreeErrorKind> {
     let transaction_raw: solana_transaction_status::EncodedConfirmedTransactionWithStatusMeta =
         client.get_transaction(&signature).await?;
     let decoded_tx = transaction_raw.transaction.transaction.decode().unwrap();
-    let signatures: Vec<Vec<u8>> = decoded_tx
-        .signatures
-        .iter()
-        .map(|signature| <Signature as AsRef<[u8]>>::as_ref(signature).into())
-        .collect();
-    let signature = signatures[0].clone();
-    // let signature_str = bs58::encode(signature.clone()).into_string();
-    let transaction = SubscribeUpdateTransaction {
-        transaction: Some(SubscribeUpdateTransactionInfo {
-            signature,
-            is_vote: false,
-            transaction: Some(Transaction {
-                signatures: signatures,
-                message: {
-                    let m = decoded_tx.message;
-                    Some(Message {
-                        header: {
-                            let h = m.header();
-                            Some(MessageHeader {
-                                num_readonly_signed_accounts: h.num_readonly_signed_accounts as u32,
-                                num_readonly_unsigned_accounts: h.num_readonly_unsigned_accounts
-                                    as u32,
-                                num_required_signatures: h.num_required_signatures as u32,
-                            })
+
+    let inner_instructions = Into::<Option<Vec<UiInnerInstructions>>>::into(
+        transaction_raw.transaction.meta.unwrap().inner_instructions,
+    )
+    .map(|inner_instructions| {
+        inner_instructions
+            .into_iter()
+            .map(|ix| InnerInstructions {
+                index: ix.index,
+                instructions: ix
+                    .instructions
+                    .into_iter()
+                    .map(|ix| match ix {
+                        UiInstruction::Compiled(ix) => InnerInstruction {
+                            instruction: CompiledInstruction {
+                                program_id_index: ix.program_id_index,
+                                accounts: ix.accounts,
+                                data: bs58::decode(ix.data).into_vec().unwrap(),
+                            },
+                            stack_height: ix.stack_height,
                         },
-                        recent_blockhash: m.recent_blockhash().to_bytes().to_vec(),
-                        account_keys: m
-                            .static_account_keys()
-                            .iter()
-                            .map(|k| k.to_bytes().to_vec())
-                            .collect(),
-                        versioned: true,
-                        address_table_lookups: m
-                            .address_table_lookups()
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(|mat| MessageAddressTableLookup {
-                                readonly_indexes: mat.readonly_indexes.to_vec(),
-                                writable_indexes: mat.writable_indexes.to_vec(),
-                                account_key: mat.account_key.to_bytes().to_vec(),
-                            })
-                            .collect(),
-                        instructions: m
-                            .instructions()
-                            .into_iter()
-                            .map(|i| CompiledInstruction {
-                                data: i.data.to_vec(),
-                                accounts: i.accounts.to_vec(),
-                                program_id_index: i.program_id_index as u32,
-                            })
-                            .collect(),
+                        _ => todo!(),
                     })
-                },
-            }),
-            meta: transaction_raw.transaction.meta.map(|meta| {
-                let inner_instructions = Into::<Option<Vec<UiInnerInstructions>>>::into(
-                    meta.inner_instructions,
-                )
-                .map(|inner_instructions| {
-                    inner_instructions
-                        .into_iter()
-                        .map(|ix| InnerInstructions {
-                            index: ix.index as u32,
-                            instructions: ix
-                                .instructions
-                                .into_iter()
-                                .map(|ix| match ix {
-                                    UiInstruction::Compiled(ix) => InnerInstruction {
-                                        program_id_index: ix.program_id_index as u32,
-                                        accounts: ix.accounts,
-                                        data: bs58::decode(ix.data).into_vec().unwrap(),
-                                        stack_height: ix.stack_height,
-                                    },
-                                    _ => todo!(),
-                                })
-                                .collect(),
-                        })
-                        .collect()
-                });
+                    .collect(),
+            })
+            .collect()
+    });
 
-                let log_messages = Into::<Option<Vec<String>>>::into(meta.log_messages);
-
-                let pre_token_balances =
-                    Into::<Option<Vec<UiTransactionTokenBalance>>>::into(meta.pre_token_balances)
-                        .map(|b| {
-                            b.into_iter()
-                                .map(|b| TokenBalance {
-                                    account_index: b.account_index as u32,
-                                    mint: b.mint,
-                                    ui_token_amount: Some(UiTokenAmount {
-                                        ui_amount: b.ui_token_amount.ui_amount.unwrap_or_default(),
-                                        decimals: b.ui_token_amount.decimals as u32,
-                                        amount: b.ui_token_amount.amount,
-                                        ui_amount_string: b.ui_token_amount.ui_amount_string,
-                                    }),
-                                    owner: Into::<Option<String>>::into(b.owner)
-                                        .unwrap_or_default(),
-                                    program_id: Into::<Option<String>>::into(b.program_id)
-                                        .unwrap_or_default(),
-                                })
-                                .collect()
-                        });
-                let post_token_balances =
-                    Into::<Option<Vec<UiTransactionTokenBalance>>>::into(meta.post_token_balances)
-                        .map(|b| {
-                            b.into_iter()
-                                .map(|b| TokenBalance {
-                                    account_index: b.account_index as u32,
-                                    mint: b.mint,
-                                    ui_token_amount: Some(UiTokenAmount {
-                                        ui_amount: b.ui_token_amount.ui_amount.unwrap_or_default(),
-                                        decimals: b.ui_token_amount.decimals as u32,
-                                        amount: b.ui_token_amount.amount,
-                                        ui_amount_string: b.ui_token_amount.ui_amount_string,
-                                    }),
-                                    owner: Into::<Option<String>>::into(b.owner)
-                                        .unwrap_or_default(),
-                                    program_id: Into::<Option<String>>::into(b.program_id)
-                                        .unwrap_or_default(),
-                                })
-                                .collect()
-                        });
-
-                let (loaded_writable_addresses, loaded_readonly_addresses) =
-                    Into::<Option<UiLoadedAddresses>>::into(meta.loaded_addresses)
-                        .map(|x| {
-                            (
-                                x.writable
-                                    .into_iter()
-                                    .map(|a| bs58::decode(a).into_vec().unwrap())
-                                    .collect(),
-                                x.readonly
-                                    .into_iter()
-                                    .map(|a| bs58::decode(a).into_vec().unwrap())
-                                    .collect(),
-                            )
-                        })
-                        .unwrap_or((Vec::default(), Vec::default()));
-
-                let return_data = Into::<Option<UiTransactionReturnData>>::into(meta.return_data)
-                    .map(|r| ReturnData {
-                        data: base64::engine::general_purpose::STANDARD
-                            .decode(r.data.0)
-                            .unwrap(),
-                        program_id: bs58::decode(r.program_id).into_vec().unwrap(),
-                    });
-
-                TransactionStatusMeta {
-                    err: None,
-                    fee: meta.fee,
-                    pre_balances: meta.pre_balances,
-                    post_balances: meta.post_balances,
-                    inner_instructions_none: inner_instructions.is_none(),
-                    inner_instructions: inner_instructions.unwrap_or_default(),
-                    log_messages_none: log_messages.is_none(),
-                    log_messages: log_messages.unwrap_or_default(),
-                    pre_token_balances: pre_token_balances.unwrap_or_default(),
-                    post_token_balances: post_token_balances.unwrap_or_default(),
-                    rewards: Vec::new(),
-                    loaded_writable_addresses,
-                    loaded_readonly_addresses,
-                    return_data_none: return_data.is_none(),
-                    return_data: return_data,
-                    compute_units_consumed: meta.compute_units_consumed.into(),
-                }
-            }),
-            index: 0,
-        }),
+    Ok(TransactionInfo {
         slot: transaction_raw.slot,
-    };
-
-    let mut pipe = redis::pipe();
-    pipe.xadd_maxlen(
-        // &das_grpc_ingest::config::ConfigGrpcTransactions::default_stream(),
-        "TXN_FILL",
-        redis::streams::StreamMaxlen::Approx(
-            das_grpc_ingest::config::ConfigGrpcTransactions::default_stream_maxlen(),
-        ),
-        format!(
-            "{}-{}",
-            transaction_raw.block_time.unwrap() as u64 * 1000 + transaction_raw.slot % 10, // Making slot usnique for that timestamp in order to maintain order
-            tree_index * 10000 + index // just to make sure there is no collide between signature index because of multiple trees doing txns at the same time
-                                       // signature_str
-        ), // Custom id to retain order of txns
-        &[(
-            &das_grpc_ingest::config::ConfigGrpcTransactions::default_stream_data_key(),
-            transaction.encode_to_vec(),
-        )],
-    );
-    pipe.atomic()
-        .query_async::<_, RedisValue>(&mut connection)
-        .await
-        .map_err(|_| TreeErrorKind::RedisPipe)?;
-
-    Ok(())
+        signature: decoded_tx.signatures[0],
+        account_keys: decoded_tx.message.static_account_keys().to_vec(),
+        message_instructions: decoded_tx.message.instructions().to_vec(),
+        meta_inner_instructions: inner_instructions.unwrap_or_default(),
+    })
 }
 
 fn spawn_transaction_worker(
     client: Rpc,
-    connection: MultiplexedConnection,
-    signature: SigIndex,
-) -> JoinHandle<()> {
+    signature: Signature,
+) -> JoinHandle<Option<TransactionInfo>> {
     tokio::spawn(async move {
         let timing = Instant::now();
 
-        if let Err(e) = queue_transaction(client, connection, signature).await {
-            error!("queue transaction: {:?}", e);
+        let r = match fetch_and_parse_transaction(client, signature).await {
+            Ok(transaction) => {
+                statsd_count!("transaction.succeeded", 1);
+                Some(transaction)
+            }
+            Err(e) => {
+                error!("queue transaction: {:?}", e);
 
-            statsd_count!("transaction.failed", 1);
-        } else {
-            statsd_count!("transaction.succeeded", 1);
-        }
+                statsd_count!("transaction.failed", 1);
+                None
+            }
+        };
 
         statsd_time!("transaction.queued", timing.elapsed());
+
+        r
     })
 }
