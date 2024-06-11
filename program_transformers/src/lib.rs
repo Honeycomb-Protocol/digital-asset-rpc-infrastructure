@@ -6,7 +6,7 @@ use {
         hpl_programs::{
             handle_hpl_character_manager_account, handle_hpl_currency_manager_account,
             handle_hpl_hive_control_account, handle_hpl_nectar_missions_account,
-            handle_hpl_nectar_staking_account,
+            handle_hpl_nectar_staking_account, handle_hpl_resource_manager_account,
         },
         mpl_core_program::handle_mpl_core_account,
         noop::handle_noop_instruction,
@@ -21,7 +21,8 @@ use {
             hpl_character_manager::HplCharacterManagerParser,
             hpl_currency_manager::HplCurrencyManagerParser, hpl_hive_control::HplHiveControlParser,
             hpl_nectar_missions::HplNectarMissionsParser,
-            hpl_nectar_staking::HplNectarStakingParser, mpl_core_program::MplCoreParser,
+            hpl_nectar_staking::HplNectarStakingParser,
+            hpl_resource_manager::HplResourceManagerParser, mpl_core_program::MplCoreParser,
             noop::NoopParser, token_account::TokenAccountParser,
             token_metadata::TokenMetadataParser, ProgramParseResult,
         },
@@ -118,6 +119,7 @@ impl ProgramTransformer {
         let hpl_character_manager = HplCharacterManagerParser {};
         let hpl_currency_manager = HplCurrencyManagerParser {};
         let hpl_hive_control = HplHiveControlParser {};
+        let hpl_resource_manager = HplResourceManagerParser {};
         let hpl_nectar_staking = HplNectarStakingParser {};
         let hpl_nectar_missions = HplNectarMissionsParser {};
 
@@ -132,6 +134,7 @@ impl ProgramTransformer {
         parsers.insert(hpl_hive_control.key(), Box::new(hpl_hive_control));
         parsers.insert(hpl_nectar_staking.key(), Box::new(hpl_nectar_staking));
         parsers.insert(hpl_nectar_missions.key(), Box::new(hpl_nectar_missions));
+        parsers.insert(hpl_resource_manager.key(), Box::new(hpl_resource_manager));
         let hs = parsers.iter().fold(HashSet::new(), |mut acc, (k, _)| {
             acc.insert(*k);
             acc
@@ -320,6 +323,10 @@ impl ProgramTransformer {
                 }
                 ProgramParseResult::HplCurrencyManager(parsing_result) => {
                     handle_hpl_currency_manager_account(account_info, parsing_result, &self.storage)
+                        .await
+                }
+                ProgramParseResult::HplResourceManager(parsing_result) => {
+                    handle_hpl_resource_manager_account(account_info, parsing_result, &self.storage)
                         .await
                 }
                 ProgramParseResult::HplHiveControl(parsing_result) => {

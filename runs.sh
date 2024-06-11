@@ -101,7 +101,7 @@ args=(
 #   --clone HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm --clone 5ZJG4CchgDXQ9LVS5a7pmib1VS69t8SSsV5riexibwTk # Hive Control
 #   --clone ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg --clone U7w6LJRtG4jvUQv4WjTinkHnv9UAfHjBiVdr2HERiX2 # Character Manager
 #   --clone CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4 --clone DcYW5MQscHQE4PmFpbohn9JJqqN3vyYau83eXTx8yAcJ # Currency Manager
-#   --clone Assetw8uxLogzVXic5P8wGYpVdesS1oZHfSnBFHAu42s --clone FRAhFGRAa93JwJQuHJ7HngtA1Nfp6JmSRqpGHjxtLsGK # Resource Manager
+#   --clone RSCR7UoY65mDMK8z2eCBvFmj4HSepGEY9ZjdCTiUDUA --clone 85rdQei5HBMjFoN1ProxSu5kC2LuyKXhaRqRRtAb9w9u # Resource Manager
 #   --clone MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6 --clone GerKtMVEu66ZCha6oaab8iGrBHc5Q6VYNRCNMgXn1WGm # Nectar Staking
 #   --clone B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h --clone DhZGz5bbfvqeMn9tb6FbH4Q1jpcb1K9REon5Ps92GuMV # Resource Manager TEST
   --clone Ha71K2v3q9wL3hDLbGx5mRnAXd6CdgzNx5GJHDbWvPRg --clone G5s6HRnHwRTGcE1cXAZeeCsFeurVGuW2Wqhr7UBiDZWQ

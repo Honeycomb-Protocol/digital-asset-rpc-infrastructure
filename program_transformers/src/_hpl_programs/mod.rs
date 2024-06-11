@@ -184,9 +184,9 @@ impl IndexablePrograms for HoneycombPrograms {
         self.programs
             .push(pubkey!("ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg")); // CharacterManager
         self.programs
-            .push(pubkey!("Assetw8uxLogzVXic5P8wGYpVdesS1oZHfSnBFHAu42s")); // Resource Manager
+            .push(pubkey!("RSCR7UoY65mDMK8z2eCBvFmj4HSepGEY9ZjdCTiUDUA")); // Resource Manager
         self.programs
-            .push(pubkey!("B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h")); // Resource Manager TEST
+            .push(pubkey!("RSCR7UoY65mDMK8z2eCBvFmj4HSepGEY9ZjdCTiUDUA")); // Resource Manager TEST
         self.programs
             .push(pubkey!("ATQfyuSouoFHW393YFYeojfBcsPD6KpM4cVCzSwkguT2")); // Test Resource Manager
         self.programs

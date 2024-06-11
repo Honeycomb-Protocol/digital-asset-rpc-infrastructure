@@ -9,12 +9,14 @@ mod hpl_currency_manager;
 mod hpl_hive_control;
 mod hpl_nectar_missions;
 mod hpl_nectar_staking;
+mod hpl_resource_manager;
 
 pub use hpl_character_manager::handle_hpl_character_manager_account;
 pub use hpl_currency_manager::handle_hpl_currency_manager_account;
 pub use hpl_hive_control::handle_hpl_hive_control_account;
 pub use hpl_nectar_missions::handle_hpl_nectar_missions_account;
 pub use hpl_nectar_staking::handle_hpl_nectar_staking_account;
+pub use hpl_resource_manager::handle_hpl_resource_manager_account;
 
 pub async fn save_account<'a, Data: hpl_toolkit::schema::ToSchema>(
     db: &'a DatabaseConnection,
