@@ -24,7 +24,7 @@ cat << EOL > /plugin-config/grpc-plugin-config.json
             "level": "info"
         },
         "grpc": {
-            "address": "0.0.0.0:10000",
+            "address": "0.0.0.0:10001",
             "max_decoding_message_size": "4_194_304",
             "snapshot_plugin_channel_capacity": null,
             "snapshot_client_channel_capacity": "50_000_000",

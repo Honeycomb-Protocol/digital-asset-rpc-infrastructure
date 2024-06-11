@@ -76,13 +76,15 @@ services:
   #     dockerfile: Load.Dockerfile
 
   proxy:
+    environment:
+      RUST_LOG: info
     build:
       context: .
       dockerfile: Proxy.Dockerfile
     volumes:
       - ./metaplex-rpc-proxy/envoy-compose.yaml:/etc/envoy.yaml
     ports:
-      - 7691:9091
+      - 9091:9091
   api:
     depends_on:
       - migrator
@@ -97,19 +99,19 @@ services:
       context: .
       dockerfile: Api.Dockerfile
     ports:
-      - 7690:9090
+      - 9090:9090
 
   redis:
     image: "redis:7.0.0"
     ports:
-      - "7679:6379"
+      - "6379:6379"
   redis-commander:
     image: rediscommander/redis-commander:latest
     restart: always
     environment:
       - REDIS_HOSTS=local:redis:6379
     ports:
-      - "7681:8081"
+      - "9081:8081"
 
   db:
     image: 'postgres:14'
@@ -125,19 +127,19 @@ services:
         "max_connections=200"
       ]
     ports:
-      - 7632:5432
+      - 5439:5432
     environment:
       POSTGRES_USER: solana # The PostgreSQL user (useful to connect to the database)
       POSTGRES_PASSWORD: solana # The PostgreSQL password (useful to connect to the database)
       POSTGRES_DB: solana
     volumes:
-      - ./db-data/:/var/lib/postgresql/data/:rw
+      - /mnt/ledgerdb/localnet/db-data/:/var/lib/postgresql/data/:rw
 
   solana:
     image: das-geyser-grpc
     volumes:
       - ./programs:/so/:ro
-      - ./ledger:/config:rw
+      - /mnt/ledgerdb/localnet/ledger:/config:rw
       - ./solana-test-validator-geyser-config:/plugin-config:rw
       - ./runs.sh:/runs.sh
     environment:
@@ -145,10 +147,9 @@ services:
       PLUGIN_MESSENGER_CONFIG.messenger_type: "Redis"
       PLUGIN_MESSENGER_CONFIG.connection_config: '{redis_connection_str="redis://redis"}'
     ports:
-      - "7692:8900"
-      - "7694:8900"
+      - "9099:8899"
+      - "9092:8900"
       - "10000:10000"
-      - "7693:8899"
       # - "9092:8900"
       # - "8899:8899"
       # - "8900:8900"

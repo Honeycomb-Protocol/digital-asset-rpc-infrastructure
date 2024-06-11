@@ -9,28 +9,31 @@ pub struct Recipe {
 
     pub key: Pubkey,
 
-    pub xp: XpPair,
+    pub xp: u64,
 
-    pub output: ResourceAmountPair,
+    pub ingredients: Vec<Ingredient>,
 
-    pub inputs: Vec<ResourceAmountPair>,
-
-    pub output_characteristics: VecMap<String, String>,
+    pub meal: Meal,
 }
 impl Recipe {
     pub const DISCRIMINATOR: [u8; 8] = [10, 162, 156, 100, 56, 193, 205, 77];
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
-pub struct ResourceAmountPair {
-    pub resource: Pubkey,
-
-    pub amount: u64,
+pub enum Ingredient {
+    Fungible { mint: Pubkey, amount: u64 },
+    INF { mint: Pubkey, amount: u64 },
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
-pub struct XpPair {
-    pub label: String,
-
-    pub increment: u64,
+pub enum Meal {
+    Fungible {
+        mint: Pubkey,
+        amount: u64,
+    },
+    INF {
+        mint: Pubkey,
+        amount: u64,
+        characteristics: VecMap<String, String>,
+    },
 }
