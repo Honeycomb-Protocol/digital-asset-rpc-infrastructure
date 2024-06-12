@@ -111,19 +111,6 @@ pub async fn run(config: ConfigIngester) -> anyhow::Result<()> {
     let mut last_activity = tokio::time::Instant::now();
     loop {
         // Check for inactivity and shutdown if necessary
-        let inactivity_timeout_fut = if let Some(inactivity_timeout) = inactivity_timeout {
-            let timespent = tokio::time::Instant::now() - last_activity;
-            debug!(
-                "Inactivity: Timespent {:?}/{:?}",
-                timespent, inactivity_timeout
-            );
-            if timespent >= inactivity_timeout {
-                break Ok(());
-            }
-            sleep_until(last_activity + inactivity_timeout).boxed()
-        } else {
-            pending().boxed()
-        };
         pt_tasks_len.store(pt_tasks.len(), Ordering::Relaxed);
 
         let redis_messages_recv = if pt_tasks.len() == pt_max_tasks_in_process {
@@ -137,40 +124,74 @@ pub async fn run(config: ConfigIngester) -> anyhow::Result<()> {
             pt_tasks.join_next().boxed()
         };
 
-        let msg = tokio::select! {
-            result = &mut jh_metrics_xlen => match result {
-                Ok(Ok(_)) => unreachable!(),
-                Ok(Err(error)) => break Err(error),
-                Err(error) => break Err(error.into()),
-            },
-            Some(signal) = shutdown.next() => {
-                warn!("{signal} received, waiting spawned tasks...");
+        let msg = if let Some(inactivity_timeout) = inactivity_timeout {
+            let timespent = tokio::time::Instant::now() - last_activity;
+            debug!(
+                "Inactivity: Timespent {:?}/{:?}",
+                timespent, inactivity_timeout
+            );
+            if timespent >= inactivity_timeout {
                 break Ok(());
-            },
-            result = &mut redis_tasks_fut => break result,
-            msg = redis_messages_recv => match msg {
-                Some(msg) => {
-                    if inactivity_timeout.is_some() {
-                        last_activity = tokio::time::Instant::now();
-                        debug!(
-                            "Inactivity: setting {:?}",
-                            last_activity
-                        );
-                    }
-                    msg
+            }
+
+            tokio::select! {
+                result = &mut jh_metrics_xlen => match result {
+                    Ok(Ok(_)) => unreachable!(),
+                    Ok(Err(error)) => break Err(error),
+                    Err(error) => break Err(error.into()),
                 },
-                None => break Ok(()),
-            },
-            result = pt_tasks_next => {
-                if let Some(result) = result {
-                    result??;
+                Some(signal) = shutdown.next() => {
+                    warn!("{signal} received, waiting spawned tasks...");
+                    break Ok(());
+                },
+                result = &mut redis_tasks_fut => break result,
+                msg = redis_messages_recv => match msg {
+                    Some(msg) => {
+                        last_activity = tokio::time::Instant::now();
+                            debug!(
+                                "Inactivity: setting {:?}",
+                                last_activity
+                            );
+                        msg
+                    },
+                    None => break Ok(()),
+                },
+                result = pt_tasks_next => {
+                    if let Some(result) = result {
+                        result??;
+                    }
+                    continue;
+                },
+                _ = sleep_until(last_activity + inactivity_timeout).boxed() => {
+                    // Timeout occurred, handle inactivity
+                    debug!("Inactivity timeout reached, shutting down...");
+                    break Ok(());
                 }
-                continue;
-            },
-            _ = inactivity_timeout_fut => {
-                // Timeout occurred, handle inactivity
-                debug!("Inactivity timeout reached, shutting down...");
-                break Ok(());
+            }
+        } else {
+            tokio::select! {
+                result = &mut jh_metrics_xlen => match result {
+                    Ok(Ok(_)) => unreachable!(),
+                    Ok(Err(error)) => break Err(error),
+                    Err(error) => break Err(error.into()),
+                },
+                Some(signal) = shutdown.next() => {
+                    warn!("{signal} received, waiting spawned tasks...");
+                    break Ok(());
+                },
+                result = &mut redis_tasks_fut => break result,
+                msg = redis_messages_recv => match msg {
+                    Some(msg) => {
+                        msg
+                    },
+                    None => break Ok(()),
+                },
+                result = pt_tasks_next => {
+                    if let Some(result) = result {
+                        result??;
+                    }
+                    continue;
+                }
             }
         };
 
