@@ -315,13 +315,25 @@ fn spawn_tree_worker(
 async fn fetch_and_parse_transaction<'a>(
     client: Rpc,
     signature: Signature,
-) -> Result<TransactionInfo, TreeErrorKind> {
+) -> Result<Option<TransactionInfo>, TreeErrorKind> {
     let transaction_raw: solana_transaction_status::EncodedConfirmedTransactionWithStatusMeta =
         client.get_transaction(&signature).await?;
+
+    if transaction_raw.transaction.meta.is_none() {
+        debug!("Skipping Tx {:?} because no meta", signature);
+        return Ok(None);
+    }
+
+    let meta = transaction_raw.transaction.meta.unwrap();
+    debug!("tx status {:?} {:?}", meta.status, meta.err);
+    if meta.status.is_err() {
+        return Ok(None);
+    }
+
     let decoded_tx = transaction_raw.transaction.transaction.decode().unwrap();
 
     let inner_instructions = Into::<Option<Vec<UiInnerInstructions>>>::into(
-        transaction_raw.transaction.meta.unwrap().inner_instructions,
+        meta.inner_instructions,
     )
     .map(|inner_instructions| {
         inner_instructions
@@ -347,13 +359,13 @@ async fn fetch_and_parse_transaction<'a>(
             .collect()
     });
 
-    Ok(TransactionInfo {
+    Ok(Some(TransactionInfo {
         slot: transaction_raw.slot,
         signature: decoded_tx.signatures[0],
         account_keys: decoded_tx.message.static_account_keys().to_vec(),
         message_instructions: decoded_tx.message.instructions().to_vec(),
         meta_inner_instructions: inner_instructions.unwrap_or_default(),
-    })
+    }))
 }
 
 fn spawn_transaction_worker(
@@ -366,7 +378,7 @@ fn spawn_transaction_worker(
         let r = match fetch_and_parse_transaction(client, signature).await {
             Ok(transaction) => {
                 statsd_count!("transaction.succeeded", 1);
-                Some(transaction)
+                transaction
             }
             Err(e) => {
                 error!("queue transaction: {:?}", e);
