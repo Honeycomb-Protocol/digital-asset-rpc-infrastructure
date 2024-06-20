@@ -127,6 +127,16 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
                         pipe_accounts += 1;
                     }
                     UpdateOneof::Transaction(transaction) => {
+
+                        if let Some(transaction) = transaction.transaction.as_ref() {
+                            if transaction.meta.is_none() || transaction.meta.as_ref().unwrap().err.is_some() {
+                                continue;
+                            }
+                        } else {
+                            continue;
+                        }
+
+
                         let slot_signature = hex::encode(transaction.transaction.as_ref().map(|t| t.signature.clone()).unwrap_or_default()).to_string();
 
                         if seen_update_events.get(&slot_signature).is_some() {
