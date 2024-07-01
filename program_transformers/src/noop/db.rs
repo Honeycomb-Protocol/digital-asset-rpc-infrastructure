@@ -428,20 +428,31 @@ pub async fn new_character_event<T>(
 where
     T: ConnectionTrait + TransactionTrait,
 {
-    let new_history = character_history::ActiveModel {
-        event: Set(event), //Set(("NewCharacter").to_string()),
-        event_data: Set(event_data.into()),
-        character_id: Set(character_id),
-        slot_updated: Set(slot),
-        ..Default::default()
-    };
-    let query = character_history::Entity::insert(new_history)
-        .on_conflict(
-            OnConflict::columns([character_history::Column::Id])
-                .update_columns([character_history::Column::CharacterId])
-                .to_owned(),
-        )
-        .build(DbBackend::Postgres);
+    let found = character_history::Entity::find()
+        .filter(character_history::Column::CharacterId.eq(character_id.to_owned()))
+        .filter(character_history::Column::Event.eq(event.to_owned()))
+        .filter(character_history::Column::SlotUpdated.eq(slot.to_owned()))
+        .one(txn)
+        .await
+        .map_err(|db_err| ProgramTransformerError::StorageReadError(db_err.to_string()))?;
 
-    exec_query(txn, query).await
+    if found.is_none() {
+        let new_history = character_history::ActiveModel {
+            event: Set(event), //Set(("NewCharacter").to_string()),
+            event_data: Set(event_data.into()),
+            character_id: Set(character_id),
+            slot_updated: Set(slot),
+            ..Default::default()
+        };
+        let query = character_history::Entity::insert(new_history)
+            .on_conflict(
+                OnConflict::columns([character_history::Column::Id])
+                    .update_columns([character_history::Column::CharacterId])
+                    .to_owned(),
+            )
+            .build(DbBackend::Postgres);
+
+        exec_query(txn, query).await
+    }
+    Ok(())
 }
