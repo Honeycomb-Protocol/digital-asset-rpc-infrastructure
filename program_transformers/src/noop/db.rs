@@ -269,7 +269,7 @@ async fn handle_leaf_patch<'c, T: ConnectionTrait + TransactionTrait>(
     let mut db_data: compressed_data::ActiveModel = found.unwrap().into();
     debug!("Found old_data {:?}", db_data);
 
-    let tree = merkle_tree::Entity::find_by_id(db_data.id.clone().unwrap())
+    let tree = merkle_tree::Entity::find_by_id(db_data.tree_id.clone().unwrap())
         .one(txn)
         .await
         .map_err(|db_err| ProgramTransformerError::StorageReadError(db_err.to_string()))?;
