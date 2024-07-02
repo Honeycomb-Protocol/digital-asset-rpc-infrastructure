@@ -452,7 +452,7 @@ where
             )
             .build(DbBackend::Postgres);
 
-        exec_query(txn, query).await
+        exec_query(txn, query).await?;
     }
     Ok(())
 }
