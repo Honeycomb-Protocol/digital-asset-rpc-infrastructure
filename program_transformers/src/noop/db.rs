@@ -391,11 +391,13 @@ where
         SchemaValue::Enum(kind, _) => kind,
         _ => unreachable!(),
     };
-
+    
     let new_used_by_kind = match new_used_by.clone() {
         SchemaValue::Enum(kind, _) => kind,
         _ => unreachable!(),
     };
+    debug!("pre_used_by_kind {:?}", pre_used_by_kind.to_string());
+    debug!("new_used_by_kind {:?}", new_used_by_kind.to_string());
 
     let event = match (pre_used_by_kind.as_str(), new_used_by_kind.as_str()) {
         ("Ejected", "None") => String::from("Wrapped"),
