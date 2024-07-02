@@ -298,9 +298,9 @@ async fn handle_leaf_patch<'c, T: ConnectionTrait + TransactionTrait>(
                         if let Some(used_by) = object.get("used_by") {
                             log_character_history(
                                 txn,
-                                id.clone(),
-                                used_by.clone().into(),
-                                data.clone(),
+                                id.to_owned(),
+                                used_by.to_owned().into(),
+                                data.to_owned(),
                                 slot as i64,
                             )
                             .await?;
@@ -309,7 +309,7 @@ async fn handle_leaf_patch<'c, T: ConnectionTrait + TransactionTrait>(
                 }
             }
 
-            object.insert(key, data.to_owned().into());
+            object.insert(key, data.into());
         }
     }
 
@@ -391,7 +391,7 @@ where
         SchemaValue::Enum(kind, _) => kind,
         _ => unreachable!(),
     };
-    
+
     let new_used_by_kind = match new_used_by.clone() {
         SchemaValue::Enum(kind, _) => kind,
         _ => unreachable!(),

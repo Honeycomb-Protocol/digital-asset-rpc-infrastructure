@@ -83,6 +83,14 @@ impl Context for RpcProxy {
 }
 
 impl HttpContext for RpcProxy {
+    fn on_http_response_headers(&mut self, _: usize, _end_of_stream: bool) -> Action {
+        // If there is a Content-Length header and we change the length of
+        // the body later, then clients will break. So remove it.
+        // We must do this here, because once we exit this function we
+        // can no longer modify the response headers.
+        self.set_http_response_header("content-length", None);
+        Action::Continue
+    }
     fn on_http_request_body(&mut self, body_size: usize, end_of_stream: bool) -> Action {
         lazy_static! {
             static ref FILTER: Regex =

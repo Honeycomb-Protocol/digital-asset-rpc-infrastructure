@@ -1,5 +1,6 @@
 FROM rust:1.75-bullseye AS builder
-RUN cargo install wasm-pack
+
+RUN cargo install wasm-pack@0.12.1
 
 RUN mkdir /rust
 COPY Cargo.toml /rust
@@ -14,7 +15,7 @@ COPY grpc-ingest /rust/grpc-ingest
 COPY ops /rust/ops
 COPY program_transformers /rust/program_transformers
 COPY tools /rust/tools
-COPY blockbuster rust/blockbuster
+COPY blockbuster /rust/blockbuster
 
 WORKDIR /rust/metaplex-rpc-proxy
 RUN mkdir /rust/wasm-out/
