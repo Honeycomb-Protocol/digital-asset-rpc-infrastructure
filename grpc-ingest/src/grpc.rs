@@ -4,10 +4,10 @@ use {
     },
     anyhow::Context,
     futures::{channel::mpsc, stream::StreamExt, SinkExt},
+    log::{debug, error},
     lru::LruCache,
     redis::{streams::StreamMaxlen, RedisResult, Value as RedisValue},
-    std::num::NonZeroUsize,
-    std::{collections::HashMap, sync::Arc, time::Duration},
+    std::{collections::HashMap, num::NonZeroUsize, sync::Arc, time::Duration},
     tokio::{
         spawn,
         task::JoinSet,
@@ -20,7 +20,70 @@ use {
     },
     yellowstone_grpc_tools::config::GrpcRequestToProto,
 };
+pub async fn try_streaming_grpc_loop(
+    config: &ConfigGrpc,
+    tx: &mut mpsc::Sender<UpdateOneof>,
+    endpoint: &String,
+) -> anyhow::Result<()> {
+    let mut client = GeyserGrpcClient::build_from_shared(endpoint.to_owned())?
+        .x_token(config.x_token.clone())?
+        .connect_timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(30))
+        .connect()
+        .await
+        .context("failed to connect to gRPC")?;
 
+    client.ping(1).await?;
+
+    let mut accounts = HashMap::with_capacity(1);
+    let mut transactions = HashMap::with_capacity(1);
+    accounts.insert("das".to_string(), config.accounts.filter.clone().to_proto());
+    transactions.insert(
+        "das".to_string(),
+        config.transactions.filter.clone().to_proto(),
+    );
+
+    let request = SubscribeRequest {
+        accounts,
+        transactions,
+        ..Default::default()
+    };
+    debug!(
+        "subscribing to client {}, status {:?}",
+        endpoint,
+        client.health_check().await?
+    );
+    match client.subscribe_with_request(Some(request)).await {
+        Ok((_subscribe_tx, mut stream)) => {
+            debug!("subscribtion sent to client {}", endpoint);
+
+            while let Some(resp) = stream.next().await {
+                match resp {
+                    Ok(msg) => {
+                        if let Some(update) = msg.update_oneof {
+                            tx.send(update)
+                                .await
+                                .expect("Failed to send update to management thread");
+                        } else {
+                            debug!("unhandled response from {}: {:?}", endpoint, msg);
+                        }
+                    }
+                    Err(error) => {
+                        debug!("got error from grpc {}: {}", endpoint, error);
+                    }
+                }
+            }
+            Ok::<(), anyhow::Error>(())
+        }
+        Err(error) => {
+            debug!(
+                "got error from grpc {} while connecting stream: {}",
+                endpoint, error
+            );
+            Err(error.into())
+        }
+    }
+}
 pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
     let config = Arc::new(config);
     let (tx, mut rx) = mpsc::channel::<UpdateOneof>(config.geyser_update_message_buffer_size); // Adjust buffer size as needed
@@ -44,41 +107,21 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
     for endpoint in config.geyser_endpoints.clone() {
         let config = Arc::clone(&config);
         let mut tx = tx.clone();
-
-        let mut client = GeyserGrpcClient::build_from_shared(endpoint)?
-            .x_token(config.x_token.clone())?
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(10))
-            .connect()
-            .await
-            .context("failed to connect to gRPC")?;
-
+        let ep = endpoint.clone();
+        debug!("client conncted for {}", &ep);
+        let mut retry_count: usize = 0;
         spawn(async move {
-            let mut accounts = HashMap::with_capacity(1);
-            let mut transactions = HashMap::with_capacity(1);
-
-            accounts.insert("das".to_string(), config.accounts.filter.clone().to_proto());
-            transactions.insert(
-                "das".to_string(),
-                config.transactions.filter.clone().to_proto(),
-            );
-
-            let request = SubscribeRequest {
-                accounts,
-                transactions,
-                ..Default::default()
-            };
-
-            let (_subscribe_tx, mut stream) = client.subscribe_with_request(Some(request)).await?;
-
-            while let Some(Ok(msg)) = stream.next().await {
-                if let Some(update) = msg.update_oneof {
-                    tx.send(update)
-                        .await
-                        .expect("Failed to send update to management thread");
+            while retry_count < 10 {
+                match try_streaming_grpc_loop(&config, &mut tx, &ep).await {
+                    Ok(_) => {
+                        error!("try_streaming_grpc_loop: Ended unexpectedly");
+                    }
+                    Err(err) => {
+                        error!("try_streaming_grpc_loop: Final Error, {}", err);
+                    }
                 }
+                retry_count += 1;
             }
-            Ok::<(), anyhow::Error>(())
         });
     }
 
@@ -114,6 +157,7 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
                         if seen_update_events.get(&slot_pubkey).is_some() {
                             continue;
                         } else {
+                            debug!("Adding new account: {}", &slot_pubkey);
                             seen_update_events.put(slot_pubkey, ());
                         };
 
@@ -142,6 +186,8 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
                         if seen_update_events.get(&slot_signature).is_some() {
                             continue;
                         } else {
+                            debug!("Adding new tx: {}", &slot_signature);
+
                             seen_update_events.put(slot_signature, ());
                         };
 
