@@ -1,7 +1,7 @@
 use {
     crate::error::{ProgramTransformerError, ProgramTransformerResult},
     digital_asset_types::dao::{
-        asset, asset_authority, asset_creators, asset_data, asset_grouping, backfill_items,
+        asset, asset_authority, asset_creators, asset_data, asset_grouping,
         cl_audits_v2, cl_items,
         sea_orm_active_enums::{
             ChainMutability, Instruction, Mutability, OwnerType, RoyaltyTargetType,
@@ -10,13 +10,13 @@ use {
     },
     mpl_bubblegum::types::{Collection, Creator},
     sea_orm::{
-        entity::{ActiveValue, ColumnTrait, EntityTrait},
-        query::{JsonValue, QueryFilter, QuerySelect, QueryTrait},
+        entity::{ActiveValue, EntityTrait},
+        query::{JsonValue,  QueryTrait},
         sea_query::query::OnConflict,
         ConnectionTrait, DbBackend, TransactionTrait,
     },
     spl_account_compression::events::ChangeLogEventV1,
-    tracing::{debug, error, info},
+    tracing::{debug, error},
 };
 
 pub async fn save_changelog_event<'c, T>(
@@ -40,7 +40,7 @@ const fn node_idx_to_leaf_idx(index: i64, tree_height: u32) -> i64 {
 
 pub async fn insert_change_log<'c, T>(
     change_log_event: &ChangeLogEventV1,
-    slot: u64,
+    _slot: u64,
     txn_id: &str,
     txn: &T,
     instruction: &str,
