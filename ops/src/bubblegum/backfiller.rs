@@ -12,10 +12,12 @@ use program_transformers::{ProgramTransformer, TransactionInfo};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, SqlxPostgresConnector};
 use solana_sdk::instruction::CompiledInstruction;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
+use solana_transaction_status::option_serializer::OptionSerializer;
 use solana_transaction_status::{
     InnerInstruction, InnerInstructions, UiInnerInstructions, UiInstruction,
 };
 use sqlx::PgPool;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -358,11 +360,21 @@ async fn fetch_and_parse_transaction<'a>(
             })
             .collect()
     });
-
+    let mut account_keys = decoded_tx.message.static_account_keys().to_vec();
+    if decoded_tx.message.address_table_lookups().is_some() {
+        if let OptionSerializer::Some(ad) = &meta.loaded_addresses {
+            for i in &ad.writable {
+                account_keys.push(Pubkey::from_str(i).unwrap());
+            }
+            for i in &ad.readonly {
+                account_keys.push(Pubkey::from_str(i).unwrap());
+            }
+        }
+    }
     Ok(Some(TransactionInfo {
         slot: transaction_raw.slot,
         signature: decoded_tx.signatures[0],
-        account_keys: decoded_tx.message.static_account_keys().to_vec(),
+        account_keys: account_keys,
         message_instructions: decoded_tx.message.instructions().to_vec(),
         meta_inner_instructions: inner_instructions.unwrap_or_default(),
     }))
