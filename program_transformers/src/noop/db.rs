@@ -379,7 +379,7 @@ pub async fn log_character_history<T>(
     txn: &T,
     character_id: Vec<u8>,
     pre_used_by: SchemaValue,
-    new_used_by: SchemaValue,
+    mut new_used_by: SchemaValue,
     slot: i64,
 ) -> Result<(), ProgramTransformerError>
 where
@@ -415,6 +415,31 @@ where
     debug!("pre_used_by_kind {:?}", pre_used_by_kind);
     debug!("new_used_by_kind {:?}", new_used_by_kind);
     debug!("Event Matched");
+
+    // let mut updated_new_used_by = new_used_by.clone();
+
+    if event == "RecallFromMission".to_string() {
+        let found = character_history::Entity::find()
+            .filter(character_history::Column::CharacterId.eq(character_id.to_owned()))
+            .order_by_desc(character_history::Column::CreatedAt) // Change to appropriate timestamp or ID column
+            .one(txn)
+            .await
+            .map_err(|db_err| ProgramTransformerError::StorageReadError(db_err.to_string()))?;
+
+        if found.is_none() {
+            return Err(ProgramTransformerError::StorageReadError(
+                "Could not find old character history data in db".to_string(),
+            ));
+        }
+
+        let last_character_history: character_history::ActiveModel = found.unwrap().into();
+
+        update_schema_value(
+            &mut new_used_by,
+            &pre_used_by_kind,
+            last_character_history.id.unwrap(), // Ensure you have a valid id field
+        );
+    }
 
     new_character_event(txn, character_id, new_used_by, event, slot as i64).await
 }
@@ -457,4 +482,74 @@ where
         exec_query(txn, query).await?;
     }
     Ok(())
+}
+
+fn update_schema_value(
+    schema_value: &mut SchemaValue,
+    pre_used_by_kind: &str,
+    last_character_history_id: i64,
+) {
+    match schema_value {
+        SchemaValue::Object(map) => {
+            match map.get_mut(&("params").to_string()) {
+                Some(SchemaValue::Null) => {
+                    // If "params" is null, create a new params object
+                    debug!("new_used_by params is null");
+                    map.insert(
+                        "params".to_string(),
+                        create_params(pre_used_by_kind, last_character_history_id),
+                    );
+                }
+                Some(SchemaValue::Object(params_map)) => {
+                    // If "params" is an object, update its fields
+                    debug!("new_used_by params is an object");
+                    params_map.insert(
+                        "pre_used_by".to_string(),
+                        SchemaValue::String(pre_used_by_kind.to_string()),
+                    );
+                    params_map.insert(
+                        "last_character_history_id".to_string(),
+                        SchemaValue::Number(Number::I64(last_character_history_id)),
+                    );
+                    params_map.insert("reward".to_string(), SchemaValue::Null); // Or specify a default value if you have one
+                }
+                Some(_) => {
+                    // If "params" exists but is not null or an object, replace it
+                    debug!("new_used_by params exists but is not null or an object");
+                    map.insert(
+                        "params".to_string(),
+                        create_params(pre_used_by_kind, last_character_history_id),
+                    );
+                }
+                None => {
+                    // If "params" key does not exist, insert it with the desired object
+                    debug!("new_used_by params key doesn't exist");
+                    map.insert(
+                        "params".to_string(),
+                        create_params(pre_used_by_kind, last_character_history_id),
+                    );
+                }
+            }
+        }
+        _ => {
+            // Handle unexpected top-level types if necessary
+            debug!("new_used_by params not condition match");
+
+        }
+    }
+}
+
+// Helper function to create a new params object
+fn create_params(pre_used_by_kind: &str, last_character_history_id: i64) -> SchemaValue {
+    let mut new_map = VecMap::new();
+    new_map.insert(
+        "pre_used_by".to_string(),
+        SchemaValue::String(pre_used_by_kind.to_string()),
+    );
+    new_map.insert(
+        "last_character_history_id".to_string(),
+        SchemaValue::Number(Number::I64(last_character_history_id)),
+    );
+    new_map.insert("reward".to_string(), SchemaValue::Null); // Or specify a default value if you have one
+    SchemaValue::Object(new_map)
 }
