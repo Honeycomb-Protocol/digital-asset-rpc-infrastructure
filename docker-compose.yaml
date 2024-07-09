@@ -44,7 +44,7 @@ services:
       - /bin/sh
       - -c
       - |
-        /usr/src/app/das-ops bubblegum backfill --programs HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm,ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg,CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4,RSCR7UoY65mDMK8z2eCBvFmj4HSepGEY9ZjdCTiUDUA,B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h,MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6,HuntaX1CmUt5EByyFPE8pMf13SpvezybmMTtjmpmGmfj,Gui1D2TnmAqakeHfp4NNZCcpqawNVgmJxT9JBUqXgyoD --database-url postgres://solana:solana@db/solana --messenger-redis-url redis://redis:6379 --solana-rpc-url http://solana:8899
+        /usr/src/app/das-ops bubblegum backfill --only-trees 8CvQbUSii4WqKcezEZqH1SKtiTZoZzvLY1wtkFBiH1bi --programs HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm,ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg,CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4,RSCR7UoY65mDMK8z2eCBvFmj4HSepGEY9ZjdCTiUDUA,B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h,MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6,HuntaX1CmUt5EByyFPE8pMf13SpvezybmMTtjmpmGmfj,Gui1D2TnmAqakeHfp4NNZCcpqawNVgmJxT9JBUqXgyoD --database-url postgres://solana:solana@db/solana --messenger-redis-url redis://redis:6379 --solana-rpc-url http://solana:8899
         sleep 2m
 
   migrator:
@@ -76,6 +76,8 @@ services:
   #     dockerfile: Load.Dockerfile
 
   proxy:
+    environment:
+      RUST_LOG: info
     build:
       context: .
       dockerfile: Proxy.Dockerfile
@@ -101,8 +103,6 @@ services:
 
   redis:
     image: "redis:7.0.0"
-    ports:
-      - "6379:6379"
   redis-commander:
     image: rediscommander/redis-commander:latest
     restart: always
@@ -112,7 +112,7 @@ services:
       - "9081:8081"
 
   db:
-    image: 'postgres:14'
+    image: "postgres:14"
     restart: always
     command:
       [
@@ -122,7 +122,7 @@ services:
         "-c",
         "log_destination=stderr",
         "-c",
-        "max_connections=200"
+        "max_connections=200",
       ]
     ports:
       - 5439:5432
@@ -131,13 +131,13 @@ services:
       POSTGRES_PASSWORD: solana # The PostgreSQL password (useful to connect to the database)
       POSTGRES_DB: solana
     volumes:
-      - /mnt/ledgerdb/localnet/db-data/:/var/lib/postgresql/data/:rw
+      - ./db-data/:/var/lib/postgresql/data/:rw
 
   solana:
     image: das-geyser-grpc
     volumes:
       - ./programs:/so/:ro
-      - /mnt/ledgerdb/localnet/ledger:/config:rw
+      - ./ledger:/config:rw
       - ./solana-test-validator-geyser-config:/plugin-config:rw
       - ./runs.sh:/runs.sh
     environment:
@@ -145,7 +145,7 @@ services:
       PLUGIN_MESSENGER_CONFIG.messenger_type: "Redis"
       PLUGIN_MESSENGER_CONFIG.connection_config: '{redis_connection_str="redis://redis"}'
     ports:
-      - "9099:8899"
+      - "9093:8899"
       - "9092:8900"
       - "10000:10000"
       # - "9092:8900"
