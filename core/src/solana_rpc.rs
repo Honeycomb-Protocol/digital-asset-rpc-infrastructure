@@ -32,7 +32,10 @@ pub struct Rpc(Arc<RpcClient>);
 
 impl Rpc {
     pub fn from_config(config: SolanaRpcArgs) -> Self {
-        Rpc(Arc::new(RpcClient::new(config.solana_rpc_url)))
+        Rpc(Arc::new(RpcClient::new_with_timeout(
+            config.solana_rpc_url,
+            std::time::Duration::from_secs(60),
+        )))
     }
 
     pub async fn get_transaction(
