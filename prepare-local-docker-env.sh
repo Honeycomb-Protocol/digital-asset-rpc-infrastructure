@@ -16,6 +16,7 @@ EXTERNAL_ID=("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s" \
 "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL" \
 "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" \
 "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" \
+"CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d" \
 "8bvPnYE5Pvz2Z9dE6RAqWr1rzLknTndZ9hwvRE6kPDXP" # Libreplex fair launch
 )
 EXTERNAL_SO=("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s.so" \
@@ -25,6 +26,7 @@ EXTERNAL_SO=("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s.so" \
 "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL.so" \
 "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA.so" \
 "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb.so" \
+"CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d.so" \
 "8bvPnYE5Pvz2Z9dE6RAqWr1rzLknTndZ9hwvRE6kPDXP.so"
 )
 
