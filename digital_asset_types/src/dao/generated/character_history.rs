@@ -14,7 +14,7 @@ impl EntityName for Entity {
 
 #[derive(Clone, Debug, PartialEq, DeriveModel, DeriveActiveModel, Serialize, Deserialize)]
 pub struct Model {
-    pub id: Vec<u8>,
+    pub id: i64,
     pub character_id: Vec<u8>,
     pub event: String,
     pub event_data: Json,
