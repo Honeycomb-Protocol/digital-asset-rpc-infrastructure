@@ -4,7 +4,7 @@ use {
     },
     anyhow::Context,
     futures::{channel::mpsc, stream::StreamExt, SinkExt},
-    log::{debug, error},
+    log::{debug, error, info},
     lru::LruCache,
     redis::{streams::StreamMaxlen, RedisResult, Value as RedisValue},
     std::{collections::HashMap, num::NonZeroUsize, sync::Arc, time::Duration},
@@ -157,15 +157,16 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
         tokio::select! {
             _ = interval.tick() => {
                 let desired_time = std::time::SystemTime::now() - std::time::Duration::from_secs(10);
+                info!("[PENDING_LOOP] Pending Txs {}", pending_update_events.len());
                 pending_update_events = pending_update_events.into_iter().fold(HashMap::new(), |mut map, (slot_signature, (endpoint_index, timestamp, transaction))| {
 
                     if timestamp > desired_time {
-                        debug!("[PENDING_LOOP] Retaining tx: {}", &slot_signature);
+                        info!("[PENDING_LOOP] Retaining tx: {} {}", endpoint_index, &slot_signature);
                         map.insert(slot_signature, (endpoint_index, timestamp, transaction));
                         return map;
                     }
 
-                    debug!("[PENDING_LOOP] Consuming tx: {}", &slot_signature);
+                    info!("[PENDING_LOOP] Consuming tx: {} {}", endpoint_index, &slot_signature);
                     seen_update_events.put(slot_signature.to_owned(), 1);
 
                     pipe.xadd_maxlen(
@@ -191,6 +192,7 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
                     pipe_transactions += 1;
                     map
                 });
+                info!("[PENDING_LOOP] Remaining Pending Txs {}", pending_update_events.len());
             },
             result = &mut jh_metrics_xlen => match result {
                 Ok(Ok(_)) => unreachable!(),
@@ -242,12 +244,13 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
                             continue;
                         }
 
-                        if pending_update_events.get(&slot_signature).is_some() {
+                        if pending_update_events.get(&slot_signature).is_none() {
+                            info!("Pushing into pending TXs tx: {} {}", endpoint_index, &slot_signature);
                             pending_update_events.insert(slot_signature, (endpoint_index, std::time::SystemTime::now(), transaction));
                             continue;
                         }
 
-                        debug!("Adding new tx: {}", &slot_signature);
+                        info!("Adding new tx: {} {}", endpoint_index, &slot_signature);
                         pending_update_events.remove(&slot_signature);
                         seen_update_events.put(slot_signature, 1);
 
