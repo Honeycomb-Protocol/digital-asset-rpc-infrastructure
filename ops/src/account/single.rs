@@ -1,13 +1,12 @@
 use anyhow::Result;
+use yellowstone_grpc_proto::geyser::{SubscribeUpdateAccount, SubscribeUpdateAccountInfo};
 
 use super::account_details::AccountDetails;
 use clap::Parser;
-use das_core::{MetricsArgs, QueueArgs, QueuePool, Rpc, SolanaRpcArgs};
-use flatbuffers::FlatBufferBuilder;
-use plerkle_serialization::{
-    serializer::serialize_account, solana_geyser_plugin_interface_shims::ReplicaAccountInfoV2,
-};
+use das_core::{MetricsArgs, QueueArgs, Rpc, SolanaRpcArgs};
+use redis::Value as RedisValue;
 use solana_sdk::pubkey::Pubkey;
+use yellowstone_grpc_proto::prost::Message;
 
 #[derive(Debug, Parser, Clone)]
 pub struct Args {
@@ -33,29 +32,63 @@ fn parse_pubkey(s: &str) -> Result<Pubkey, &'static str> {
 
 pub async fn run(config: Args) -> Result<()> {
     let rpc = Rpc::from_config(config.solana);
-    let queue = QueuePool::try_from_config(config.queue).await?;
+
+    let client = redis::Client::open(config.queue.messenger_redis_url)?;
+    let mut connection = client.get_multiplexed_tokio_connection().await?;
+    let mut pipe = redis::pipe();
+    // let queue = QueuePool::try_from_config(config.queue).await?;
 
     let AccountDetails {
-        account,
+        account: account_raw,
         slot,
         pubkey,
     } = AccountDetails::fetch(&rpc, &config.account).await?;
-    let builder = FlatBufferBuilder::new();
-    let account_info = ReplicaAccountInfoV2 {
-        pubkey: &pubkey.to_bytes(),
-        lamports: account.lamports,
-        owner: &account.owner.to_bytes(),
-        executable: account.executable,
-        rent_epoch: account.rent_epoch,
-        data: &account.data,
-        write_version: 0,
-        txn_signature: None,
+    // let builder = FlatBufferBuilder::new();
+    // let account_info = ReplicaAccountInfoV2 {
+    //     pubkey: &pubkey.to_bytes(),
+    //     lamports: account.lamports,
+    //     owner: &account.owner.to_bytes(),
+    //     executable: account.executable,
+    //     rent_epoch: account.rent_epoch,
+    //     data: &account.data,
+    //     write_version: 0,
+    //     txn_signature: None,
+    // };
+
+    // let fbb = serialize_account(builder, &account_info, slot, false);
+    // let bytes = fbb.finished_data();
+
+    // queue.push_account_backfill(bytes).await?;
+
+    let account: SubscribeUpdateAccount = SubscribeUpdateAccount {
+        account: Some(SubscribeUpdateAccountInfo {
+            pubkey: pubkey.to_bytes().to_vec(),
+            lamports: account_raw.lamports,
+            owner: account_raw.owner.to_bytes().to_vec(),
+            executable: account_raw.executable,
+            rent_epoch: account_raw.rent_epoch,
+            data: account_raw.data,
+            write_version: 0,                // UNKNOWN
+            txn_signature: Some(Vec::new()), // Unknown
+        }),
+        slot,
+        is_startup: false,
     };
+    pipe.xadd_maxlen(
+        &das_grpc_ingest::config::ConfigGrpcAccounts::default_stream(),
+        redis::streams::StreamMaxlen::Approx(
+            das_grpc_ingest::config::ConfigGrpcAccounts::default_stream_maxlen(),
+        ),
+        "*",
+        &[(
+            &das_grpc_ingest::config::ConfigGrpcAccounts::default_stream_data_key(),
+            account.encode_to_vec(),
+        )],
+    );
 
-    let fbb = serialize_account(builder, &account_info, slot, false);
-    let bytes = fbb.finished_data();
-
-    queue.push_account_backfill(bytes).await?;
+    pipe.atomic()
+        .query_async::<_, RedisValue>(&mut connection)
+        .await?;
 
     Ok(())
 }
