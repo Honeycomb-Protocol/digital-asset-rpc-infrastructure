@@ -18,6 +18,7 @@ pub struct Model {
     pub discriminator: Vec<u8>,
     pub program: Option<Vec<u8>>,
     pub data_schema: Vec<u8>,
+    pub canopy_depth: u8,
     pub created_at: Option<DateTimeWithTimeZone>,
 }
 
@@ -27,6 +28,7 @@ pub enum Column {
     Discriminator,
     Program,
     DataSchema,
+    CanopyDepth,
     CreatedAt,
 }
 
@@ -53,6 +55,7 @@ impl ColumnTrait for Column {
             Self::Discriminator => ColumnType::Binary.def(),
             Self::Program => ColumnType::Binary.def().null(),
             Self::DataSchema => ColumnType::Binary.def(),
+            Self::CanopyDepth => ColumnType::Integer.def(),
             Self::CreatedAt => ColumnType::TimestampWithTimeZone.def().null(),
         }
     }

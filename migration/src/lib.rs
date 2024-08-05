@@ -46,6 +46,7 @@ mod m20240319_120101_add_mpl_core_enum_vals;
 mod m20240320_120101_add_mpl_core_info_items;
 mod m20240509_213421_add_character_history_table;
 mod m20240522_085331_create_compressed_data_changelog_table;
+mod m20240805_095941_add_canopy_depth_in_merkle_tree;
 
 pub mod model;
 
@@ -89,18 +90,19 @@ impl MigratorTrait for Migrator {
             Box::new(m20231118_174007_add_compressed_data::Migration),
             Box::new(m20231122_191039_create_merkle_tree_table::Migration),
             Box::new(m20231206_120101_remove_was_decompressed::Migration),
-            Box::new(m20240206_175504_create_acccounts_table::Migration),
-            Box::new(m20240509_213421_add_character_history_table::Migration),
-            Box::new(m20240522_085331_create_compressed_data_changelog_table::Migration),
             Box::new(m20240104_203133_add_cl_audits_v2::Migration),
             Box::new(m20240104_203328_remove_cl_audits::Migration),
             Box::new(m20240116_130744_add_update_metadata_ix::Migration),
             Box::new(m20240117_120101_alter_creator_indices::Migration),
             Box::new(m20240124_173104_add_tree_seq_index_to_cl_audits_v2::Migration),
             Box::new(m20240124_181900_add_slot_updated_column_per_update_type::Migration),
+            Box::new(m20240206_175504_create_acccounts_table::Migration),
             Box::new(m20240313_120101_add_mpl_core_plugins_columns::Migration),
             Box::new(m20240319_120101_add_mpl_core_enum_vals::Migration),
             Box::new(m20240320_120101_add_mpl_core_info_items::Migration),
+            Box::new(m20240509_213421_add_character_history_table::Migration),
+            Box::new(m20240522_085331_create_compressed_data_changelog_table::Migration),
+            Box::new(m20240805_095941_add_canopy_depth_in_merkle_tree::Migration),
         ]
     }
 }

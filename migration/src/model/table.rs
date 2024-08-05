@@ -175,3 +175,14 @@ pub enum ClAuditsV2 {
     Tx,
     Instruction,
 }
+
+#[derive(Copy, Clone, Iden)]
+pub enum MerkleTree {
+    Table,
+    Id,
+    Discriminator,
+    Program,
+    DataSchema,
+    CanopyDepth,
+    CreatedAt,
+}
