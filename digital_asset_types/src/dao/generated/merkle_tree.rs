@@ -18,7 +18,7 @@ pub struct Model {
     pub discriminator: Vec<u8>,
     pub program: Option<Vec<u8>>,
     pub data_schema: Vec<u8>,
-    pub canopy_depth: u8,
+    pub canopy_depth: i32,
     pub created_at: Option<DateTimeWithTimeZone>,
 }
 
