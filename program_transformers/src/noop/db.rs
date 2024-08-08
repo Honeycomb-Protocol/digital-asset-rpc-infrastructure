@@ -56,8 +56,19 @@ where
             discriminator,
             tree_id,
             schema,
+            canopy_depth,
             program_id,
-        } => handle_tree(txn, discriminator, tree_id, schema, program_id).await?,
+        } => {
+            handle_tree(
+                txn,
+                discriminator,
+                tree_id,
+                schema,
+                canopy_depth as i32,
+                program_id,
+            )
+            .await?
+        }
         CompressedDataEvent::Leaf {
             slot,
             tree_id,
@@ -74,6 +85,7 @@ async fn handle_tree<'c, T: ConnectionTrait + TransactionTrait>(
     discriminator: [u8; 32],
     tree_id: [u8; 32],
     schema: Schema,
+    canopy_depth: i32,
     program_id: [u8; 32],
 ) -> ProgramTransformerResult<()> {
     info!("Found new tree {}", bs58::encode(tree_id).into_string());
@@ -89,6 +101,7 @@ async fn handle_tree<'c, T: ConnectionTrait + TransactionTrait>(
         data_schema: Set(data_schema),
         discriminator: Set(discriminator.to_vec()),
         program: Set(Some(program_id.to_vec())),
+        canopy_depth: Set(canopy_depth),
         ..Default::default()
     };
 

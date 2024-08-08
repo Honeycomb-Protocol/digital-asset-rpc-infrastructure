@@ -296,16 +296,19 @@ create table merkle_tree
     id                   bytea PRIMARY KEY,
 
     -- Identification
-    discriminator                    bytea not null,
+    discriminator        bytea              not null,
 
     -- Origin
-    program                     bytea,
+    program              bytea,
 
     -- Schema
-    data_schema                    bytea not null,
+    data_schema          bytea              not null,
+
+
+    canopy_depth        int                 not null    default 0,
 
     -- visibility
-    created_at                timestamp with time zone           default (now() at time zone 'utc')
+    created_at          timestamp with time zone        default (now() at time zone 'utc')
 );
 -- @@@@@@
 

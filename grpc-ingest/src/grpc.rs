@@ -4,7 +4,7 @@ use {
     },
     anyhow::Context,
     futures::{channel::mpsc, stream::StreamExt, SinkExt},
-    log::{debug, error},
+    log::{debug, error, info},
     lru::LruCache,
     redis::{streams::StreamMaxlen, RedisResult, Value as RedisValue},
     std::{collections::HashMap, num::NonZeroUsize, sync::Arc, time::Duration},
@@ -16,16 +16,24 @@ use {
     tracing::warn,
     yellowstone_grpc_client::GeyserGrpcClient,
     yellowstone_grpc_proto::{
-        geyser::SubscribeRequest, prelude::subscribe_update::UpdateOneof, prost::Message,
+        geyser::{SubscribeRequest, SubscribeUpdateTransaction},
+        prelude::subscribe_update::UpdateOneof,
+        prost::Message,
     },
     yellowstone_grpc_tools::config::GrpcRequestToProto,
 };
+
+pub struct GrpcStream {
+    endpoint_index: u8,
+    update: UpdateOneof,
+}
+
 pub async fn try_streaming_grpc_loop(
     config: &ConfigGrpc,
-    tx: &mut mpsc::Sender<UpdateOneof>,
-    endpoint: &String,
+    tx: &mut mpsc::Sender<GrpcStream>,
+    endpoint: (u8, &String),
 ) -> anyhow::Result<()> {
-    let mut client = GeyserGrpcClient::build_from_shared(endpoint.to_owned())?
+    let mut client = GeyserGrpcClient::build_from_shared(endpoint.1.to_owned())?
         .x_token(config.x_token.clone())?
         .connect_timeout(Duration::from_secs(30))
         .timeout(Duration::from_secs(30))
@@ -49,27 +57,30 @@ pub async fn try_streaming_grpc_loop(
         ..Default::default()
     };
     debug!(
-        "subscribing to client {}, status {:?}",
+        "subscribing to client {:?}, status {:?}",
         endpoint,
         client.health_check().await?
     );
     match client.subscribe_with_request(Some(request)).await {
         Ok((_subscribe_tx, mut stream)) => {
-            debug!("subscribtion sent to client {}", endpoint);
+            debug!("subscribtion sent to client {}", endpoint.1);
 
             while let Some(resp) = stream.next().await {
                 match resp {
                     Ok(msg) => {
                         if let Some(update) = msg.update_oneof {
-                            tx.send(update)
-                                .await
-                                .expect("Failed to send update to management thread");
+                            tx.send(GrpcStream {
+                                endpoint_index: endpoint.0,
+                                update,
+                            })
+                            .await
+                            .expect("Failed to send update to management thread");
                         } else {
-                            debug!("unhandled response from {}: {:?}", endpoint, msg);
+                            debug!("unhandled response from {:?}: {:?}", endpoint, msg);
                         }
                     }
                     Err(error) => {
-                        debug!("got error from grpc {}: {}", endpoint, error);
+                        debug!("got error from grpc {:?}: {}", endpoint, error);
                     }
                 }
             }
@@ -77,16 +88,17 @@ pub async fn try_streaming_grpc_loop(
         }
         Err(error) => {
             debug!(
-                "got error from grpc {} while connecting stream: {}",
+                "got error from grpc {:?} while connecting stream: {}",
                 endpoint, error
             );
             Err(error.into())
         }
     }
 }
+
 pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
     let config = Arc::new(config);
-    let (tx, mut rx) = mpsc::channel::<UpdateOneof>(config.geyser_update_message_buffer_size); // Adjust buffer size as needed
+    let (tx, mut rx) = mpsc::channel::<GrpcStream>(config.geyser_update_message_buffer_size); // Adjust buffer size as needed
 
     // Connect to Redis
     let client = redis::Client::open(config.redis.url.clone())?;
@@ -104,7 +116,7 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
     tokio::pin!(jh_metrics_xlen);
 
     // Spawn gRPC client connections
-    for endpoint in config.geyser_endpoints.clone() {
+    for (i, endpoint) in config.geyser_endpoints.iter().enumerate() {
         let config = Arc::clone(&config);
         let mut tx = tx.clone();
         let ep = endpoint.clone();
@@ -112,7 +124,7 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
         let mut retry_count: usize = 0;
         spawn(async move {
             while retry_count < 10 {
-                match try_streaming_grpc_loop(&config, &mut tx, &ep).await {
+                match try_streaming_grpc_loop(&config, &mut tx, (i as u8, &ep)).await {
                     Ok(_) => {
                         error!("try_streaming_grpc_loop: Ended unexpectedly");
                     }
@@ -134,12 +146,54 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
     let deadline = sleep(config.redis.pipeline_max_idle);
     tokio::pin!(deadline);
 
-    let mut seen_update_events = LruCache::<String, ()>::new(
+    let mut pending_update_events =
+        HashMap::<String, (u8, std::time::SystemTime, SubscribeUpdateTransaction)>::new();
+    let mut seen_update_events = LruCache::<String, u64>::new(
         NonZeroUsize::new(config.solana_seen_event_cache_max_size).expect("Non zero value"),
     );
 
+    let mut interval = tokio::time::interval(Duration::from_secs(10));
     let result = loop {
         tokio::select! {
+            _ = interval.tick() => {
+                let desired_time = std::time::SystemTime::now() - std::time::Duration::from_secs(10);
+                info!("[PENDING_LOOP] Pending Txs {}", pending_update_events.len());
+                pending_update_events = pending_update_events.into_iter().fold(HashMap::new(), |mut map, (slot_signature, (endpoint_index, timestamp, transaction))| {
+
+                    if timestamp > desired_time {
+                        info!("[PENDING_LOOP] Retaining tx: {} {}", endpoint_index, &slot_signature);
+                        map.insert(slot_signature, (endpoint_index, timestamp, transaction));
+                        return map;
+                    }
+
+                    info!("[PENDING_LOOP] Consuming tx: {} {}", endpoint_index, &slot_signature);
+                    seen_update_events.put(slot_signature.to_owned(), 1);
+
+                    pipe.xadd_maxlen(
+                        &config.transactions.stream,
+                        StreamMaxlen::Approx(config.transactions.stream_maxlen),
+                        "*",
+                        &[(
+                            &config.transactions.stream_data_key,
+                            transaction.encode_to_vec(),
+                        )],
+                    );
+
+                    pipe.xadd_maxlen(
+                        &String::from("TXN_CACHE"),
+                        StreamMaxlen::Approx(config.transactions.stream_maxlen),
+                        "*",
+                        &[(
+                            &config.transactions.stream_data_key,
+                            [vec![endpoint_index], transaction.encode_to_vec()].concat(),
+                        )],
+                    );
+
+                    pipe_transactions += 1;
+                    map
+                });
+                info!("[PENDING_LOOP] Remaining Pending Txs {}", pending_update_events.len());
+            },
             result = &mut jh_metrics_xlen => match result {
                 Ok(Ok(_)) => unreachable!(),
                 Ok(Err(error)) => break Err(error),
@@ -149,16 +203,18 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
                 warn!("{signal} received, waiting spawned tasks...");
                 break Ok(());
             },
-            Some(update) = rx.next() => {
+            Some(GrpcStream { endpoint_index, update }) = rx.next() => {
                 match update {
                     UpdateOneof::Account(account) => {
                         let slot_pubkey = format!("{}:{}", account.slot, hex::encode(account.account.as_ref().map(|account| account.pubkey.clone()).unwrap_or_default()));
 
-                        if seen_update_events.get(&slot_pubkey).is_some() {
+                        if let Some(cache) = seen_update_events.get_mut(&slot_pubkey) {
+                            *cache += 1;
+                            // seen_update_events.put(slot_pubkey, *cache);
                             continue;
                         } else {
                             debug!("Adding new account: {}", &slot_pubkey);
-                            seen_update_events.put(slot_pubkey, ());
+                            seen_update_events.put(slot_pubkey, 1);
                         };
 
                         pipe.xadd_maxlen(
@@ -183,19 +239,33 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
 
                         let slot_signature = hex::encode(transaction.transaction.as_ref().map(|t| t.signature.clone()).unwrap_or_default()).to_string();
 
-                        if seen_update_events.get(&slot_signature).is_some() {
+                        if let Some(cache) = seen_update_events.get_mut(&slot_signature) {
+                            *cache += 1;
                             continue;
-                        } else {
-                            debug!("Adding new tx: {}", &slot_signature);
+                        }
 
-                            seen_update_events.put(slot_signature, ());
-                        };
+                        if pending_update_events.get(&slot_signature).is_none() {
+                            info!("Pushing into pending TXs tx: {} {}", endpoint_index, &slot_signature);
+                            pending_update_events.insert(slot_signature, (endpoint_index, std::time::SystemTime::now(), transaction));
+                            continue;
+                        }
+
+                        info!("Adding new tx: {} {}", endpoint_index, &slot_signature);
+                        pending_update_events.remove(&slot_signature);
+                        seen_update_events.put(slot_signature, 1);
 
                         pipe.xadd_maxlen(
                             &config.transactions.stream,
                             StreamMaxlen::Approx(config.transactions.stream_maxlen),
                             "*",
                             &[(&config.transactions.stream_data_key, transaction.encode_to_vec())]
+                        );
+
+                        pipe.xadd_maxlen(
+                            &String::from("TXN_CACHE"),
+                            StreamMaxlen::Approx(config.transactions.stream_maxlen),
+                            "*",
+                            &[(&config.transactions.stream_data_key, [vec![endpoint_index], transaction.encode_to_vec()].concat())]
                         );
 
                         pipe_transactions += 1;
