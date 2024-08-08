@@ -1,13 +1,14 @@
 use crate::error::{ProgramTransformerError, ProgramTransformerResult};
 use anchor_lang::{AnchorDeserialize, AnchorSerialize};
 use digital_asset_types::dao::{
-    character_history, compressed_data, compressed_data_changelog, merkle_tree,
+    accounts, character_history, compressed_data, compressed_data_changelog, merkle_tree,
 };
 use hpl_toolkit::prelude::*;
 use log::{debug, error, info};
 use sea_orm::{
     query::*, sea_query::OnConflict, ActiveValue::Set, ColumnTrait, DbBackend, EntityTrait,
 };
+use serde_json::json;
 use solana_sdk::pubkey::Pubkey;
 use spl_account_compression::events::ApplicationDataEventV1;
 use std::str::FromStr;
@@ -412,12 +413,9 @@ where
     };
 
     debug!("Event {:?}", event);
-    debug!("pre_used_by_kind {:?}", pre_used_by_kind);
-    debug!("new_used_by_kind {:?}", new_used_by_kind);
     debug!("Event Matched");
 
-    // let mut updated_new_used_by = new_used_by.clone();
-
+    
     if event == "RecallFromMission".to_string() {
         let found = character_history::Entity::find()
             .filter(character_history::Column::CharacterId.eq(character_id.to_owned()))
@@ -434,11 +432,14 @@ where
 
         let last_character_history: character_history::ActiveModel = found.unwrap().into();
 
-        update_schema_value(
+        update_new_used_by(
+            txn,
             &mut new_used_by,
             &pre_used_by_kind,
             last_character_history.id.unwrap(), // Ensure you have a valid id field
-        );
+            last_character_history.event_data.unwrap().into(),
+        )
+        .await?;
     }
 
     new_character_event(txn, character_id, new_used_by, event, slot as i64).await
@@ -484,33 +485,93 @@ where
     Ok(())
 }
 
-fn update_schema_value(
-    schema_value: &mut SchemaValue,
+async fn update_new_used_by<T>(
+    txn: &T,
+    new_used_by_value: &mut SchemaValue,
     pre_used_by_kind: &str,
     last_character_history_id: i64,
-) {
-    match schema_value {
+    event_data: JsonValue,
+) -> Result<(), ProgramTransformerError>
+where
+    T: ConnectionTrait + TransactionTrait,
+{
+    match new_used_by_value {
         SchemaValue::Enum(kind, params) => {
             debug!("new_used_by params is null");
-            debug!("kind = {:?}", kind.to_string());
-            debug!("params = {:?}", params.to_string());
+            debug!("kind = {:?}", kind);
 
-            if *kind == "None".to_string() && **params == SchemaValue::Null {
-                *schema_value = SchemaValue::Enum(
-                    "None".to_string(),
-                    Box::new(create_params(pre_used_by_kind, last_character_history_id)),
-                );
+            if let JsonValue::Object(object) = event_data {
+                if let (Some(JsonValue::Object(params)), Some(JsonValue::String(id))) =
+                    (object.get("params"), object.get("id"))
+                {
+                    // Remove the "pubkey:" prefix and convert the remaining part into a vector
+                    let stripped_id = id.strip_prefix("pubkey:").ok_or_else(|| {
+                        ProgramTransformerError::ParsingError("Invalid id format".to_string())
+                    })?;
+                    let id_vec: Vec<u8> = bs58::decode(stripped_id).into_vec().map_err(|_| {
+                        ProgramTransformerError::ParsingError("Failed to decode id".to_string())
+                    })?;
+                    let found = accounts::Entity::find_by_id(id_vec)
+                        .one(txn)
+                        .await
+                        .map_err(|db_err| {
+                            ProgramTransformerError::StorageReadError(db_err.to_string())
+                        })?;
+
+                    if found.is_none() {
+                        return Err(ProgramTransformerError::StorageReadError(
+                            "Could not account data in db".to_string(),
+                        ));
+                    }
+                    let mut account: accounts::ActiveModel = found.unwrap().into();
+
+                    let parsed_data: JsonValue = account.parsed_data.take().ok_or_else(|| {
+                        ProgramTransformerError::ParsingError("Failed to take parsed_data".into())
+                    })?;
+
+                    if let JsonValue::Object(parsed_json) = parsed_data {
+                        if let (
+                            Some(JsonValue::Array(parsed_data_rewards)),
+                            Some(JsonValue::Array(event_data_rewards)),
+                        ) = (parsed_json.get("rewards"), params.get("rewards"))
+                        {
+                            let mut new_rewards: Vec<SchemaValue> = Vec::new();
+
+                            for event_reward in event_data_rewards {
+                                if let Some(new_reward) =
+                                    calculate_reward(event_reward, parsed_data_rewards)
+                                {
+                                    new_rewards.push(new_reward.into());
+                                }
+                            }
+
+                            *new_used_by_value = SchemaValue::Enum(
+                                "None".to_string(),
+                                Box::new(create_params(
+                                    pre_used_by_kind,
+                                    last_character_history_id,
+                                    SchemaValue::Array(new_rewards),
+                                )),
+                            );
+                        }
+                    }
+                }
             }
         }
         _ => {
-            // Handle unexpected top-level types if necessary
             debug!("new_used_by params not condition match");
+            unreachable!();
         }
     }
+    Ok(())
 }
 
 // Helper function to create a new params object
-fn create_params(pre_used_by_kind: &str, last_character_history_id: i64) -> SchemaValue {
+fn create_params(
+    pre_used_by_kind: &str,
+    last_character_history_id: i64,
+    rewards: SchemaValue,
+) -> SchemaValue {
     let mut new_map = VecMap::new();
     new_map.insert(
         "pre_used_by".to_string(),
@@ -520,6 +581,48 @@ fn create_params(pre_used_by_kind: &str, last_character_history_id: i64) -> Sche
         "last_character_history_id".to_string(),
         SchemaValue::Number(Number::I64(last_character_history_id)),
     );
-    new_map.insert("reward".to_string(), SchemaValue::Null); // Or specify a default value if you have one
+    new_map.insert("rewards".to_string(), rewards);
     SchemaValue::Object(new_map)
+}
+
+fn calculate_reward(
+    event_reward: &JsonValue,
+    parsed_data_rewards: &[JsonValue],
+) -> Option<JsonValue> {
+    if let JsonValue::Object(event_reward_obj) = event_reward {
+        if let (Some(JsonValue::Number(delta)), Some(JsonValue::Number(reward_idx))) = (
+            event_reward_obj.get("delta"),
+            event_reward_obj.get("reward_idx"),
+        ) {
+            let delta = delta.as_u64()?;
+            let reward_idx = reward_idx.as_u64()? as usize;
+
+            if let Some(JsonValue::Object(min_max)) = parsed_data_rewards.get(reward_idx) {
+                if let (
+                    Some(JsonValue::Number(min)),
+                    Some(JsonValue::Number(max)),
+                    Some(JsonValue::Object(reward_type)),
+                ) = (
+                    min_max.get("min"),
+                    min_max.get("max"),
+                    min_max.get("reward_type"),
+                ) {
+                    let min = min.as_u64()?;
+                    let max = max.as_u64()?;
+                    let result = get_result_from_delta(min, max, delta);
+
+                    return Some(json!({
+                        "reward": result,
+                        "reward_type": reward_type.clone()
+                    }));
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn get_result_from_delta(min: u64, max: u64, delta: u64) -> u64 {
+    let range = max - min;
+    min + ((delta * range) / 100)
 }
