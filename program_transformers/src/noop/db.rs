@@ -6,9 +6,12 @@ use digital_asset_types::dao::{
 use hpl_toolkit::prelude::*;
 use log::{debug, error, info};
 use sea_orm::{
-    query::*, sea_query::OnConflict, ActiveValue::Set, ColumnTrait, DbBackend, EntityTrait,
+    query::*,
+    sea_query::{Expr, OnConflict},
+    ActiveValue::Set,
+    ColumnTrait, DbBackend, EntityTrait,
 };
-use serde_json::json;
+use serde_json::{json, Map};
 use solana_sdk::pubkey::Pubkey;
 use spl_account_compression::events::ApplicationDataEventV1;
 use std::str::FromStr;
@@ -428,31 +431,58 @@ where
     debug!("Event {:?}", event);
     debug!("Event Matched");
 
-    
     if event == "RecallFromMission".to_string() {
-        let found = character_history::Entity::find()
-            .filter(character_history::Column::CharacterId.eq(character_id.to_owned()))
-            .order_by_desc(character_history::Column::CreatedAt) // Change to appropriate timestamp or ID column
-            .one(txn)
-            .await
-            .map_err(|db_err| ProgramTransformerError::StorageReadError(db_err.to_string()))?;
+        debug!("RecallFromMission condition matched");
+        match new_used_by.clone() {
+            SchemaValue::Enum(kind, params) => {
+                debug!("matched new_used_by kind = {:?}", kind);
+                debug!("matched new_used_by params = {:?}", params.to_string());
 
-        if found.is_none() {
-            return Err(ProgramTransformerError::StorageReadError(
-                "Could not find old character history data in db".to_string(),
-            ));
+                if let SchemaValue::Object(object) = *params {
+                    if let Some(participation_id) = object.get(&"participation_id".to_string()) {
+                        // Remove the "pubkey:" prefix and convert the remaining part into a vector
+
+                        let found = character_history::Entity::find()
+                            .filter(Expr::cust_with_values(
+                                "event_data->>'participation_id' = ?",
+                                vec![participation_id.to_string()],
+                            ))
+                            .all(txn)
+                            .await
+                            .map_err(|db_err| {
+                                ProgramTransformerError::StorageReadError(db_err.to_string())
+                            })?;
+
+                        if found.is_empty() {
+                            return Err(ProgramTransformerError::StorageReadError(
+                                "Could not find old character history data in db".to_string(),
+                            ));
+                        }
+                        debug!("all event  = {:?}", found.to_string());
+
+                        let ids = found
+                            .iter()
+                            .filter_map(|history| Some(history.id.clone()))
+                            .collect::<Vec<i64>>();
+                        debug!("all event ids = {:?}", ids.to_string());
+
+                        update_new_used_by(
+                            txn,
+                            &mut new_used_by,
+                            &pre_used_by_kind,
+                            ids.clone(), // Ensure you have a valid id field
+                            found,
+                            ids.last(),
+                        )
+                        .await?;
+                    }
+                }
+            }
+            _ => {
+                debug!("new_used_by params not condition match");
+                unreachable!();
+            }
         }
-
-        let last_character_history: character_history::ActiveModel = found.unwrap().into();
-
-        update_new_used_by(
-            txn,
-            &mut new_used_by,
-            &pre_used_by_kind,
-            last_character_history.id.unwrap(), // Ensure you have a valid id field
-            last_character_history.event_data.unwrap().into(),
-        )
-        .await?;
     }
 
     new_character_event(txn, character_id, new_used_by, event, slot as i64).await
@@ -502,8 +532,9 @@ async fn update_new_used_by<T>(
     txn: &T,
     new_used_by_value: &mut SchemaValue,
     pre_used_by_kind: &str,
-    last_character_history_id: i64,
-    event_data: JsonValue,
+    event_participant_ids: Vec<i64>,
+    event_participant_data: Vec<character_history::Model>,
+    last_event_id: Option<&i64>,
 ) -> Result<(), ProgramTransformerError>
 where
     T: ConnectionTrait + TransactionTrait,
@@ -512,64 +543,75 @@ where
         SchemaValue::Enum(kind, params) => {
             debug!("new_used_by params is null");
             debug!("kind = {:?}", kind);
+            let mut all_rewards: Vec<Vec<JsonValue>> = Vec::new();
 
-            if let JsonValue::Object(object) = event_data {
-                if let (Some(JsonValue::Object(params)), Some(JsonValue::String(id))) =
-                    (object.get("params"), object.get("id"))
-                {
-                    // Remove the "pubkey:" prefix and convert the remaining part into a vector
-                    let stripped_id = id.strip_prefix("pubkey:").ok_or_else(|| {
-                        ProgramTransformerError::ParsingError("Invalid id format".to_string())
-                    })?;
-                    let id_vec: Vec<u8> = bs58::decode(stripped_id).into_vec().map_err(|_| {
-                        ProgramTransformerError::ParsingError("Failed to decode id".to_string())
-                    })?;
-                    let found = accounts::Entity::find_by_id(id_vec)
-                        .one(txn)
-                        .await
-                        .map_err(|db_err| {
-                            ProgramTransformerError::StorageReadError(db_err.to_string())
+            for data in &event_participant_data {
+                if let JsonValue::Object(object) = data.event_data.clone() {
+                    if let (Some(JsonValue::Object(params)), Some(JsonValue::String(id))) =
+                        (object.get("params"), object.get("id"))
+                    {
+                        // Remove the "pubkey:" prefix and convert the remaining part into a vector
+                        let stripped_id = id.strip_prefix("pubkey:").ok_or_else(|| {
+                            ProgramTransformerError::ParsingError("Invalid id format".to_string())
                         })?;
+                        let id_vec: Vec<u8> =
+                            bs58::decode(stripped_id).into_vec().map_err(|_| {
+                                ProgramTransformerError::ParsingError(
+                                    "Failed to decode id".to_string(),
+                                )
+                            })?;
+                        let found = accounts::Entity::find_by_id(id_vec)
+                            .one(txn)
+                            .await
+                            .map_err(|db_err| {
+                                ProgramTransformerError::StorageReadError(db_err.to_string())
+                            })?;
 
-                    if found.is_none() {
-                        return Err(ProgramTransformerError::StorageReadError(
-                            "Could not account data in db".to_string(),
-                        ));
-                    }
-                    let mut account: accounts::ActiveModel = found.unwrap().into();
+                        if found.is_none() {
+                            return Err(ProgramTransformerError::StorageReadError(
+                                "Could not account data in db".to_string(),
+                            ));
+                        }
+                        let mut account: accounts::ActiveModel = found.unwrap().into();
 
-                    let parsed_data: JsonValue = account.parsed_data.take().ok_or_else(|| {
-                        ProgramTransformerError::ParsingError("Failed to take parsed_data".into())
-                    })?;
+                        let parsed_data: JsonValue =
+                            account.parsed_data.take().ok_or_else(|| {
+                                ProgramTransformerError::ParsingError(
+                                    "Failed to take parsed_data".into(),
+                                )
+                            })?;
 
-                    if let JsonValue::Object(parsed_json) = parsed_data {
-                        if let (
-                            Some(JsonValue::Array(parsed_data_rewards)),
-                            Some(JsonValue::Array(event_data_rewards)),
-                        ) = (parsed_json.get("rewards"), params.get("rewards"))
-                        {
-                            let mut new_rewards: Vec<SchemaValue> = Vec::new();
+                        if let JsonValue::Object(parsed_json) = parsed_data {
+                            if let (
+                                Some(JsonValue::Array(parsed_data_rewards)),
+                                Some(JsonValue::Array(event_data_rewards)),
+                            ) = (parsed_json.get("rewards"), params.get("rewards"))
+                            {
+                                let mut new_rewards: Vec<JsonValue> = Vec::new();
 
-                            for event_reward in event_data_rewards {
-                                if let Some(new_reward) =
-                                    calculate_reward(event_reward, parsed_data_rewards)
-                                {
-                                    new_rewards.push(new_reward.into());
+                                for event_reward in event_data_rewards {
+                                    if let Some(new_reward) =
+                                        calculate_reward(event_reward, parsed_data_rewards)
+                                    {
+                                        new_rewards.push(new_reward.into());
+                                    }
                                 }
-                            }
 
-                            *new_used_by_value = SchemaValue::Enum(
-                                "None".to_string(),
-                                Box::new(create_params(
-                                    pre_used_by_kind,
-                                    last_character_history_id,
-                                    SchemaValue::Array(new_rewards),
-                                )),
-                            );
+                                all_rewards.push(new_rewards.into());
+                            }
                         }
                     }
                 }
             }
+            *new_used_by_value = SchemaValue::Enum(
+                "None".to_string(),
+                Box::new(SchemaValue::from(create_params(
+                    pre_used_by_kind,
+                    event_participant_ids.clone(),
+                    all_rewards,
+                    last_event_id,
+                ))),
+            );
         }
         _ => {
             debug!("new_used_by params not condition match");
@@ -580,22 +622,45 @@ where
 }
 
 // Helper function to create a new params object
+
 fn create_params(
     pre_used_by_kind: &str,
-    last_character_history_id: i64,
-    rewards: SchemaValue,
-) -> SchemaValue {
-    let mut new_map = VecMap::new();
+    event_participant_ids: Vec<i64>,
+    rewards: Vec<Vec<JsonValue>>,
+    last_event_id: Option<&i64>,
+) -> JsonValue {
+    let mut new_map = Map::new();
+
+    // Insert `pre_used_by`
     new_map.insert(
         "pre_used_by".to_string(),
-        SchemaValue::String(pre_used_by_kind.to_string()),
+        JsonValue::String(pre_used_by_kind.to_string()),
     );
+
+    // Convert `event_participant_ids` from Vec<i64> to JsonValue::Array and insert it
+    let participant_ids_as_json_values: Vec<JsonValue> = event_participant_ids
+        .into_iter()
+        .map(JsonValue::from)
+        .collect();
+
     new_map.insert(
-        "last_character_history_id".to_string(),
-        SchemaValue::Number(Number::I64(last_character_history_id)),
+        "event_participant_ids".to_string(),
+        JsonValue::Array(participant_ids_as_json_values),
     );
-    new_map.insert("rewards".to_string(), rewards);
-    SchemaValue::Object(new_map)
+
+    // Convert `last_event_id` to JsonValue and insert it
+    let last_event_id_json_value = match last_event_id {
+        Some(id) => JsonValue::from(*id), // Dereference id before passing it to JsonValue::from
+        None => JsonValue::Null,
+    };
+
+    new_map.insert("last_event_id".to_string(), last_event_id_json_value);
+
+    // Insert `rewards` directly as it's already a Vec<Vec<JsonValue>>
+    new_map.insert("rewards".to_string(), JsonValue::from(rewards));
+
+    // Return the constructed map wrapped in JsonValue::Object
+    JsonValue::Object(new_map)
 }
 
 fn calculate_reward(
