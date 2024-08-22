@@ -425,8 +425,13 @@ where
         ("Mission", "None") => String::from("RecallFromMission"),
         ("Mission", "Mission") => String::from("ClaimedMissionReward"),
         (_, "Ejected") => String::from("UnWrapped"),
-        (_, _) => unreachable!(),
+        _ => "".to_string(),
     };
+
+    if event == "".to_string() {
+        debug!("Unidentified event found skipping history");
+        return Ok(());
+    }
 
     debug!("Event {:?}", event);
     debug!("Event Matched");

@@ -21,6 +21,10 @@ pub enum ServiceDelegation {
         index: u8,
         permission: AssetAssemblerPermission,
     },
+    CharacterManager {
+        index: u8,
+        permission: CharacterManagerPermissions,
+    },
     AssetManager {
         index: u8,
         permission: AssetManagerPermission,
@@ -48,6 +52,12 @@ pub enum HiveControlPermission {
     ManageServices,
     ManageIndexing,
     ManageProfiles,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
+pub enum CharacterManagerPermissions {
+    ManageAssemblerConfig,
+    ManageCharacterModels,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]

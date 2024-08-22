@@ -1,7 +1,6 @@
 prometheus: 127.0.0.1:8873
 geyser_endpoints:
   - http://solana:10000
-  - http://solana:10000
 x_token: null
 commitment: processed
 accounts:
