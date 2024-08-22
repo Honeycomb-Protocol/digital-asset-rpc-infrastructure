@@ -458,13 +458,13 @@ where
                                 "Could not find old character history data in db".to_string(),
                             ));
                         }
-                        debug!("all event  = {:?}", found.to_string());
+                        debug!("all event  = {:?}", found);
 
                         let ids = found
                             .iter()
                             .filter_map(|history| Some(history.id.clone()))
                             .collect::<Vec<i64>>();
-                        debug!("all event ids = {:?}", ids.to_string());
+                        debug!("all event ids = {:?}", ids);
 
                         update_new_used_by(
                             txn,
