@@ -63,7 +63,7 @@ where
                 discriminator,
                 tree_id,
                 schema,
-                canopy_depth,
+                canopy_depth as i32,
                 program_id,
             )
             .await?
@@ -84,7 +84,7 @@ async fn handle_tree<'c, T: ConnectionTrait + TransactionTrait>(
     discriminator: [u8; 32],
     tree_id: [u8; 32],
     schema: Schema,
-    canopy_depth: u8,
+    canopy_depth: i32,
     program_id: [u8; 32],
 ) -> ProgramTransformerResult<()> {
     info!("Found new tree {}", bs58::encode(tree_id).into_string());
@@ -421,8 +421,13 @@ where
         ("Mission", "None") => String::from("RecallFromMission"),
         ("Mission", "Mission") => String::from("ClaimedMissionReward"),
         (_, "Ejected") => String::from("UnWrapped"),
-        (_, _) => unreachable!(),
+        _ => "".to_string(),
     };
+
+    if event == "".to_string() {
+        debug!("Unidentified event found skipping history");
+        return Ok(());
+    }
 
     debug!("Event {:?}", event);
     debug!("pre_used_by_kind {:?}", pre_used_by_kind);

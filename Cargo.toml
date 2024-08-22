@@ -13,7 +13,7 @@ members = [
   "tools/fetch_trees",
   "tools/load_generation",
   "tools/tree-status",
-  "tools/txn_forwarder",
+  "tools/txn_forwarder", "tools/redis_cache",
 ]
 resolver = "2"
 

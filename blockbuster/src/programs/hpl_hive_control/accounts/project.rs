@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use hpl_toolkit::prelude::*;
+use spl_account_compression::Node;
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
 pub struct Project {
@@ -12,6 +13,21 @@ pub struct Project {
     pub associated_programs: Vec<AssociatedProgram>,
     pub profile_data_config: ProfileDataConfig,
     pub profile_trees: ControlledMerkleTrees,
+    pub badge_criteria: Option<Vec<BadgeCriteria>>,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
+pub struct BadgeCriteria {
+    pub start_time: Option<i64>,
+    pub end_time: Option<i64>,
+    pub index: u16,
+    pub condition: BadgeCriteriaCondition,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
+pub enum BadgeCriteriaCondition {
+    Public,
+    Whitelisted { root: Node },
 }
 impl Project {
     pub const DISCRIMINATOR: [u8; 8] = [205, 168, 189, 202, 181, 247, 142, 19];

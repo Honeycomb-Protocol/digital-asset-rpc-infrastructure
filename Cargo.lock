@@ -5074,6 +5074,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "redis_cache"
+version = "0.7.2"
+dependencies = [
+ "redis 0.25.3",
+ "serde-redis",
+ "serde_json",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5745,6 +5754,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "780f1cebed1629e4753a1a38a3c72d30b97ec044f0aef68cb26650a3c5cf363c"
 dependencies = [
  "serde_derive",
+]
+
+[[package]]
+name = "serde-redis"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "554f4a61298b079fe5c5e0f5207f78dbe6bf13d103e381ee6aa0cf59790995f6"
+dependencies = [
+ "redis 0.22.3",
+ "serde",
 ]
 
 [[package]]
