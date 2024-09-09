@@ -8,7 +8,7 @@ pub struct Mission {
     pub mission_pool: Pubkey,
     pub name: String,
     pub min_xp: u64,
-    pub cost: Currency,
+    pub cost: MissionCost,
     pub requirement: MissionRequirement,
     pub rewards: Vec<Reward>,
 }
@@ -18,9 +18,9 @@ impl Mission {
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
-pub struct Currency {
+pub struct MissionCost {
     pub amount: u64,
-    pub address: Pubkey,
+    pub resource_address: Pubkey,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
@@ -41,5 +41,5 @@ impl Reward {
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
 pub enum RewardType {
     Xp,
-    Currency { address: Pubkey },
+    Resource { address: Pubkey },
 }

@@ -6,7 +6,7 @@ pub struct StakingPool {
     pub bump: u8,
     pub project: Pubkey,
     pub key: Pubkey,
-    pub currency: Pubkey,
+    pub resource: Pubkey,
     pub lock_type: LockType,
     pub name: String,
     pub rewards_per_duration: u64,

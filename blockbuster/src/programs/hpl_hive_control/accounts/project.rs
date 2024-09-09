@@ -14,6 +14,7 @@ pub struct Project {
     pub profile_data_config: ProfileDataConfig,
     pub profile_trees: ControlledMerkleTrees,
     pub badge_criteria: Option<Vec<BadgeCriteria>>,
+    pub subsidy_fees: bool,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]

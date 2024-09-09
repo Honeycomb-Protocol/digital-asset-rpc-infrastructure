@@ -50,6 +50,8 @@ mod mpl_core_program;
 mod noop;
 mod token;
 mod token_metadata;
+// mod token_extensions;
+// pub mod utils;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountInfo {
@@ -131,7 +133,11 @@ impl ProgramTransformer {
         parsers.insert(noop.key(), Box::new(noop));
         parsers.insert(hpl_character_manager.key(), Box::new(hpl_character_manager));
         parsers.insert(hpl_currency_manager.key(), Box::new(hpl_currency_manager));
-        parsers.insert(hpl_hive_control.key(), Box::new(hpl_hive_control));
+        parsers.insert(hpl_hive_control.key(), Box::new(hpl_hive_control.clone()));
+        parsers.insert(
+            solana_sdk::pubkey!("7fkoi6JB8izj9mAousMhUkavcX9UjigZ7tr7yNRfkkEq"),
+            Box::new(hpl_hive_control),
+        );
         parsers.insert(hpl_nectar_staking.key(), Box::new(hpl_nectar_staking));
         parsers.insert(hpl_nectar_missions.key(), Box::new(hpl_nectar_missions));
         parsers.insert(hpl_resource_manager.key(), Box::new(hpl_resource_manager));
