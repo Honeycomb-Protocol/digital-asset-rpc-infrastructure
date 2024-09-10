@@ -12,10 +12,8 @@ pub struct Resource {
     /// The mint of this resource
     pub mint: Pubkey,
 
-    pub metadata: ResourceMetadataArgs,
-
-    /// token account trees
-    pub merkle_trees: ControlledMerkleTrees,
+    /// storage of the resource
+    pub storage: ResourceStorage,
 
     // the characteristics of this resource
     pub kind: ResourceKind,
@@ -25,20 +23,18 @@ impl Resource {
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
-pub enum ResourceKind {
-    Fungible {
-        decimals: u8,
-    },
-
-    INF {
-        characteristics: Vec<String>,
-        supply: u32,
-    },
+pub enum ResourceStorage {
+    AccountState,
+    LedgerState { merkle_trees: ControlledMerkleTrees },
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
-pub struct ResourceMetadataArgs {
-    pub name: String,
-    pub symbol: String,
-    pub uri: String,
+pub enum ResourceKind {
+    HplFungible { decimals: u8 },
+
+    HplNonFungible { characteristics: Vec<String> },
+
+    WrappedFungible { decimals: u8 },
+
+    WrappedMplCore { characteristics: Vec<String> },
 }
