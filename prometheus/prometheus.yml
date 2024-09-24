@@ -1,0 +1,28 @@
+global:
+  scrape_interval: 30s
+
+rule_files:
+  - "./rules/rules.yml" # Path to your alert rules file
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - "${IP_Address}:9992" # Alertmanager's address
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["${IP_Address}:9990"]
+  - job_name: grpc2redis
+    static_configs:
+      - targets: ["grpc2redis:8873"]
+  - job_name: ingester
+    static_configs:
+      - targets: ["ingester:8874"]
+  - job_name: download-metadata
+    static_configs:
+      - targets: ["download-metadata:8875"]
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]

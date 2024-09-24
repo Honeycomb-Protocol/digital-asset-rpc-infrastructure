@@ -1,0 +1,67 @@
+groups:
+  - name: alert_rules
+    rules:
+      - alert: InstanceDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Instance {{ $labels.job }} down"
+          description: "{{ $labels.instance }} of job {{ $labels.job }} has been down for more than 5 minutes."
+
+  - name: das_general_services
+    rules:
+      - alert: DASContainerDown
+        expr: absent(container_last_seen{name="db"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "db Container is down"
+          description: "The Docker container db has been down for more than 5 minute."
+
+      - alert: DASContainerDown
+        expr: absent(container_last_seen{name="redis"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "redis Container is down"
+          description: "The Docker container redis has been down for more than 5 minute."
+
+      - alert: DASContainerDown
+        expr: absent(container_last_seen{name="redis-commander"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "redis-commander Container is down"
+          description: "The Docker container redis-commander has been down for more than 5 minute."
+
+      - alert: DASContainerDown
+        expr: absent(container_last_seen{name="proxy"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "proxy Container is down"
+          description: "The Docker container proxy has been down for more than 5 minute."
+
+      - alert: DASContainerDown
+        expr: absent(container_last_seen{name="api"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "api Container is down"
+          description: "The Docker container api has been down for more than 5 minute."
+
+      - alert: DASContainerDown
+        expr: absent(container_last_seen{name="solana"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "solana Container is down"
+          description: "The Docker container solana has been down for more than 5 minute."
