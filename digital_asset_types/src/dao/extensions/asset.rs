@@ -34,16 +34,12 @@ impl RelationTrait for Relation {
     }
 }
 
-// impl Related<token_accounts::Entity> for asset::Entity {
-//     fn to() -> RelationDef {
-//         Relation::AssetData.def()
-//     }
-// }
-impl Related<asset::Entity> for token_accounts::Entity {
+impl Related<token_accounts::Entity> for asset::Entity {
     fn to() -> RelationDef {
-        Relation::AssetHolders.def()
+        Relation::AssetData.def()
     }
 }
+
 impl Related<asset_data::Entity> for asset::Entity {
     fn to() -> RelationDef {
         Relation::AssetData.def()

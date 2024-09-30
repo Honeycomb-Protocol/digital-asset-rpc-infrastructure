@@ -283,6 +283,8 @@ pub enum OwnershipModel {
     Single,
     #[serde(rename = "token")]
     Token,
+    #[serde(rename = "all")]
+    All,
 }
 
 impl From<String> for OwnershipModel {

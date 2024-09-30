@@ -2,7 +2,6 @@
 mod full_asset;
 mod generated;
 pub mod scopes;
-use std::cell::RefCell;
 
 use self::sea_orm_active_enums::{
     OwnerType, RoyaltyTargetType, SpecificationAssetClass, SpecificationVersions,
@@ -145,20 +144,15 @@ impl SearchAssetsQuery {
             )
         }
 
-        if let Some(o) = self.owner_type.clone() {
-            conditions = conditions.add(asset::Column::OwnerType.eq(o));
-        } else {
-            // Default to NFTs
-            //
-            // In theory, the owner_type=single check should be sufficient,
-            // however there is an old bug that has marked some non-NFTs as "single" with supply > 1.
-            // The supply check guarentees we do not include those.
-            conditions = conditions.add_option(Some(
+        conditions =  match self.owner_type.clone().unwrap_or(OwnerType::Single) {
+            OwnerType::Single => conditions.add( // Assuming it is an NFT
                 asset::Column::OwnerType
                     .eq(OwnerType::Single)
                     .and(asset::Column::Supply.lte(1)),
-            ));
-        }
+            ),
+            OwnerType::Token => conditions.add(asset::Column::OwnerType.eq(OwnerType::Token)),
+            _ => conditions
+        };
 
         if let Some(c) = self.creator_address.to_owned() {
             conditions = conditions.add(asset_creators::Column::Creator.eq(c));
@@ -212,17 +206,12 @@ impl SearchAssetsQuery {
                 });
             joins.push(rel);
         }
-        debug!("before changes");
         if let Some(owner_address) = self.owner_address.to_owned() {
-            debug!("owner_address {:?}", owner_address);
-            let cond = token_accounts::Column::Owner.eq(owner_address.clone());
             conditions = conditions.add(
                 Condition::any()
-                    .add(cond)
-                    .add(asset::Column::Owner.eq(owner_address.clone())),
+                    .add(token_accounts::Column::Owner.eq(owner_address.clone()))
+                    .add(asset::Column::Owner.eq(owner_address)),
             );
-            debug!("after condition");
-            debug!("conditions {:?}", conditions);
             let rel = extensions::asset::Relation::AssetHolders
                 .def()
                 .on_condition(|left, right| {
@@ -231,10 +220,8 @@ impl SearchAssetsQuery {
                         .into_condition()
                 });
             joins.push(rel);
-            debug!("conditions {:?}", conditions);
         }
-        debug!("after changes");
-
+  
         if let Some(ju) = self.json_uri.to_owned() {
             let cond = Condition::all().add(asset_data::Column::MetadataUrl.eq(ju));
             conditions = conditions.add(cond);
@@ -274,8 +261,6 @@ impl SearchAssetsQuery {
             None | Some(false) => conditions,
             Some(true) => conditions.not(),
         };
-        debug!("Conditions {:?}", conditions);
-        debug!("Joins {:?}", joins);
         Ok((conditions, joins))
     }
 }
