@@ -47,6 +47,8 @@ pub enum Interface {
     MplCoreAsset,
     #[serde(rename = "MplCoreCollection")]
     MplCoreCollection,
+    #[serde(rename = "FungibleToken")]
+    FungibleToken,
 }
 
 impl From<(&SpecificationVersions, &SpecificationAssetClass)> for Interface {
@@ -394,4 +396,6 @@ pub struct Asset {
     pub unknown_plugins: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mpl_core_info: Option<MplCoreInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mint_extensions: Option<Value>,
 }

@@ -2,6 +2,8 @@
 mod full_asset;
 mod generated;
 pub mod scopes;
+use std::cell::RefCell;
+
 use self::sea_orm_active_enums::{
     OwnerType, RoyaltyTargetType, SpecificationAssetClass, SpecificationVersions,
 };
@@ -9,6 +11,7 @@ pub use full_asset::*;
 pub use generated::*;
 pub mod extensions;
 
+use log::debug;
 use sea_orm::{
     entity::*,
     sea_query::Expr,
@@ -93,11 +96,11 @@ impl SearchAssetsQuery {
                     .clone()
                     .map(|x| asset::Column::SpecificationAssetClass.eq(x)),
             )
-            .add_option(
-                self.owner_address
-                    .to_owned()
-                    .map(|x| asset::Column::Owner.eq(x)),
-            )
+            // .add_option(
+            //     self.owner_address
+            //         .to_owned()
+            //         .map(|x| asset::Column::Owner.eq(x)),
+            // )
             .add_option(
                 self.delegate
                     .to_owned()
@@ -209,6 +212,28 @@ impl SearchAssetsQuery {
                 });
             joins.push(rel);
         }
+        debug!("before changes");
+        if let Some(owner_address) = self.owner_address.to_owned() {
+            debug!("owner_address {:?}", owner_address);
+            let cond = token_accounts::Column::Owner.eq(owner_address.clone());
+            conditions = conditions.add(
+                Condition::any()
+                    .add(cond)
+                    .add(asset::Column::Owner.eq(owner_address.clone())),
+            );
+            debug!("after condition");
+            debug!("conditions {:?}", conditions);
+            let rel = extensions::asset::Relation::AssetHolders
+                .def()
+                .on_condition(|left, right| {
+                    Expr::tbl(right, token_accounts::Column::Mint)
+                        .eq(Expr::tbl(left, asset::Column::Id))
+                        .into_condition()
+                });
+            joins.push(rel);
+            debug!("conditions {:?}", conditions);
+        }
+        debug!("after changes");
 
         if let Some(ju) = self.json_uri.to_owned() {
             let cond = Condition::all().add(asset_data::Column::MetadataUrl.eq(ju));
@@ -245,13 +270,12 @@ impl SearchAssetsQuery {
                 });
             joins.push(rel);
         }
-
-        Ok((
-            match self.negate {
-                None | Some(false) => conditions,
-                Some(true) => conditions.not(),
-            },
-            joins,
-        ))
+        conditions = match self.negate {
+            None | Some(false) => conditions,
+            Some(true) => conditions.not(),
+        };
+        debug!("Conditions {:?}", conditions);
+        debug!("Joins {:?}", joins);
+        Ok((conditions, joins))
     }
 }
