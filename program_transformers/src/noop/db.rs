@@ -409,12 +409,18 @@ where
     // Extract the kind from pre_used_by and new_used_by
     let pre_used_by_kind = match pre_used_by.clone() {
         SchemaValue::Enum(kind, _) => kind,
-        _ => unreachable!(),
+        _ => {
+            debug!("Unidentified enum pre_used_by_kind");
+            return Ok(()); // Early return for unidentified event
+        }
     };
 
     let new_used_by_kind = match new_used_by.clone() {
         SchemaValue::Enum(kind, _) => kind,
-        _ => unreachable!(),
+        _ => {
+            debug!("Unidentified enum new_used_by_kind");
+            return Ok(()); // Early return for unidentified event
+        }
     };
 
     debug!("pre_used_by_kind {:?}", pre_used_by_kind.to_string());
@@ -492,7 +498,7 @@ where
             }
             _ => {
                 debug!("new_used_by params not condition match");
-                unreachable!();
+                return Ok(()); // Early return for unidentified event
             }
         }
     }
@@ -635,7 +641,7 @@ where
         }
         _ => {
             debug!("new_used_by_value did not match expected Enum");
-            unreachable!();
+            return Ok(()); // Early return for unidentified event
         }
     }
     Ok(())
