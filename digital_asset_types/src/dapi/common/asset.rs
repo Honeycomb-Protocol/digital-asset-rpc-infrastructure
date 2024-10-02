@@ -7,6 +7,7 @@ use crate::rpc::filter::{AssetSortBy, AssetSortDirection, AssetSorting};
 use crate::rpc::options::Options;
 use crate::rpc::response::TransactionSignatureList;
 use crate::rpc::response::{AssetError, AssetList};
+use crate::rpc::TokenInfo;
 use crate::rpc::{
     Asset as RpcAsset, Authority, Compression, Content, Creator, File, Group, Interface,
     MetadataMap, MplCoreInfo, Ownership, Royalty, Scope, Supply, Uses,
@@ -15,6 +16,7 @@ use jsonpath_lib::JsonPathError;
 use log::warn;
 use mime_guess::Mime;
 
+use num_traits::ToPrimitive;
 use sea_orm::DbErr;
 use serde_json::Map;
 use serde_json::Value;
@@ -379,6 +381,8 @@ pub fn asset_to_rpc(asset: FullAsset, options: &Options) -> Result<RpcAsset, DbE
         authorities,
         creators,
         groups,
+        token,
+        token_account,
     } = asset;
     let rpc_authorities = to_authority(authorities);
     let rpc_creators = to_creators(creators);
@@ -398,6 +402,43 @@ pub fn asset_to_rpc(asset: FullAsset, options: &Options) -> Result<RpcAsset, DbE
             num_minted: asset.mpl_core_collection_num_minted,
             current_size: asset.mpl_core_collection_current_size,
             plugins_json_version: asset.mpl_core_plugins_json_version,
+        }),
+        _ => None,
+    };
+    let token_info = match (token, token_account) {
+        (Some(token), Some(token_account)) => Some(TokenInfo {
+            decimals: token.decimals.to_u8(),
+            supply: token.supply.to_u64(),
+            mint_authority: token
+                .mint_authority
+                .map(|bytes| bs58::encode(bytes).into_string()),
+            freeze_authority: token
+                .freeze_authority
+                .map(|bytes| bs58::encode(bytes).into_string()),
+            token_program: Some(bs58::encode(token.token_program).into_string()),
+            balance: token_account.amount.to_u64(),
+            delegated_balance: token_account.delegated_amount.to_u64(),
+            associated_token_address: Some(bs58::encode(token_account.pubkey).into_string()),
+            ..Default::default()
+        }),
+        (None, Some(token_account)) => Some(TokenInfo {
+            balance: token_account.amount.to_u64(),
+            delegated_balance: token_account.delegated_amount.to_u64(),
+            associated_token_address: Some(bs58::encode(token_account.pubkey).into_string()),
+            token_program: Some(bs58::encode(token_account.token_program).into_string()),
+            ..Default::default()
+        }),
+        (Some(token), None) => Some(TokenInfo {
+            decimals: token.decimals.to_u8(),
+            supply: token.supply.to_u64(),
+            mint_authority: token
+                .mint_authority
+                .map(|bytes| bs58::encode(bytes).into_string()),
+            freeze_authority: token
+                .freeze_authority
+                .map(|bytes| bs58::encode(bytes).into_string()),
+            token_program: Some(bs58::encode(token.token_program).into_string()),
+            ..Default::default()
         }),
         _ => None,
     };
@@ -473,6 +514,7 @@ pub fn asset_to_rpc(asset: FullAsset, options: &Options) -> Result<RpcAsset, DbE
         unknown_plugins: asset.mpl_core_unknown_plugins,
         mpl_core_info,
         mint_extensions: mint_ext,
+        token_info,
     })
 }
 
