@@ -2,10 +2,12 @@ version: "3.9"
 services:
   builder:
     image: das-api/builder
+    container_name: builder
     build:
       context: .
       dockerfile: Builder.Dockerfile
   accounts-backfiller:
+    container_name: accounts-backfiller
     build:
       context: .
       dockerfile: Ops.Dockerfile
@@ -24,6 +26,7 @@ services:
         /usr/src/app/das-ops account program HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm,7fkoi6JB8izj9mAousMhUkavcX9UjigZ7tr7yNRfkkEq,ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg,CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4,RSCR7UoY65mDMK8z2eCBvFmj4HSepGEY9ZjdCTiUDUA,B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h,MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6,HuntaX1CmUt5EByyFPE8pMf13SpvezybmMTtjmpmGmfj,Gui1D2TnmAqakeHfp4NNZCcpqawNVgmJxT9JBUqXgyoD --messenger-redis-url redis://redis:6379 --solana-rpc-url http://solana:8899
         sleep 2s
   transactions-backfiller:
+    container_name: transactions-backfiller
     build:
       context: .
       dockerfile: Ops.Dockerfile
@@ -48,6 +51,7 @@ services:
         sleep 2s
 
   migrator:
+    container_name: migrator
     depends_on:
       - db
       - builder
@@ -76,6 +80,7 @@ services:
   #     dockerfile: Load.Dockerfile
 
   proxy:
+    container_name: proxy
     environment:
       RUST_LOG: error
     build:
@@ -86,6 +91,7 @@ services:
     ports:
       - 9091:9091
   api:
+    container_name: api
     depends_on:
       - migrator
       - builder
@@ -103,10 +109,12 @@ services:
 
   redis:
     image: "redis:7.0.0"
+    container_name: redis
     ports:
       - "6379:6379"
   redis-commander:
     image: rediscommander/redis-commander:latest
+    container_name: redis-commander
     restart: always
     environment:
       - REDIS_HOSTS=local:redis:6379
@@ -114,18 +122,10 @@ services:
       - "9081:8081"
 
   db:
+    container_name: db
     image: "postgres:14"
     restart: always
-    command:
-      [
-        "postgres",
-        "-c",
-        "log_statement=all",
-        "-c",
-        "log_destination=stderr",
-        "-c",
-        "max_connections=200",
-      ]
+    command: [ "postgres", "-c", "log_statement=all", "-c", "log_destination=stderr", "-c", "max_connections=200" ]
     ports:
       - 5439:5432
     environment:
@@ -137,6 +137,7 @@ services:
 
   solana:
     image: das-geyser-grpc
+    container_name: solana
     volumes:
       - ./programs:/so/:ro
       - ./ledger:/config:rw
@@ -171,6 +172,7 @@ services:
       # - "1027:1027"
 
   ingester:
+    container_name: ingester
     depends_on:
       - migrator
       - builder
@@ -193,7 +195,10 @@ services:
       options:
         max-size: 200k
         max-file: 10
+    # ports:
+    #   - "8874:8874"
   grpc2redis:
+    container_name: grpc2redis
     depends_on:
       - redis
       - solana
@@ -214,7 +219,10 @@ services:
       options:
         max-size: 200k
         max-file: 10
+    # ports:
+    #   - "8873:8873"
   download-metadata:
+    container_name: download-metadata
     depends_on:
       - migrator
       - builder
@@ -235,3 +243,70 @@ services:
       options:
         max-size: 200k
         max-file: 10
+    # ports:
+    #   - "8875:8875"
+  prometheus:
+    image: prom/prometheus
+    container_name: promtetheus
+    ports:
+      - '9990:9090'
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/rules/rules.yml:/etc/prometheus/rules/rules.yml
+      - das_prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=7d'
+    restart: unless-stopped
+
+  grafana:
+    image: docker.io/grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - '9991:3000'
+    volumes:
+      - das_grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    command:
+      - '--housekeeping_interval=55s'
+      - '--docker_only=true'
+      - '--disable_metrics=disk,network,tcp,udp,percpu,sched,process'
+    # ports:
+    #   - '8083:8080'
+    volumes:
+      # linux
+      - /:/rootfs:ro # Needed for root file system access (even though it won't work fully on Windows)
+      - /run:/run:ro # System access (won't work fully on Windows but needed)
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+      # windows
+      # - /:/rootfs:ro 
+      # - /var/run:/var/run:ro # Access to Docker's API on Windows
+      # - /sys:/sys:ro 
+      # - /c/ProgramData/docker:/var/lib/docker:ro # Windows Docker directory
+    devices:
+      - /dev/kmsg
+
+  alertmanager:
+    image: quay.io/prometheus/alertmanager:latest
+    container_name: alertmanager
+    ports:
+      - '9992:9093'
+    volumes:
+      - ./prometheus/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - alertmanager_data:/data
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+volumes:
+  das_prometheus_data:
+  das_grafana_data:
+  alertmanager_data:
