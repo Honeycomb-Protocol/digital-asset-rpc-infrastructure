@@ -11,6 +11,7 @@ use {
         mpl_core_program::handle_mpl_core_account,
         noop::handle_noop_instruction,
         token::handle_token_program_account,
+        token_extensions::handle_token_extensions_program_account,
         token_metadata::handle_token_metadata_account,
     },
     blockbuster::{
@@ -24,7 +25,8 @@ use {
             hpl_nectar_staking::HplNectarStakingParser,
             hpl_resource_manager::HplResourceManagerParser, mpl_core_program::MplCoreParser,
             noop::NoopParser, token_account::TokenAccountParser,
-            token_metadata::TokenMetadataParser, ProgramParseResult,
+            token_extensions::Token2022AccountParser, token_metadata::TokenMetadataParser,
+            ProgramParseResult,
         },
     },
     futures::future::BoxFuture,
@@ -49,6 +51,7 @@ mod hpl_programs;
 mod mpl_core_program;
 mod noop;
 mod token;
+mod token_extensions;
 mod token_metadata;
 // mod token_extensions;
 // pub mod utils;
@@ -124,6 +127,7 @@ impl ProgramTransformer {
         let hpl_nectar_staking = HplNectarStakingParser {};
         let hpl_nectar_missions = HplNectarMissionsParser {};
         let hpl_resource_manager = HplResourceManagerParser {};
+        let token_2022_manager = Token2022AccountParser {};
 
         parsers.insert(bgum.key(), Box::new(bgum));
         parsers.insert(token_metadata.key(), Box::new(token_metadata));
@@ -141,6 +145,7 @@ impl ProgramTransformer {
         parsers.insert(hpl_nectar_staking.key(), Box::new(hpl_nectar_staking));
         parsers.insert(hpl_nectar_missions.key(), Box::new(hpl_nectar_missions));
         parsers.insert(hpl_resource_manager.key(), Box::new(hpl_resource_manager));
+        parsers.insert(token_2022_manager.key(), Box::new(token_2022_manager));
         let hs = parsers.iter().fold(HashSet::new(), |mut acc, (k, _)| {
             acc.insert(*k);
             acc
@@ -303,6 +308,15 @@ impl ProgramTransformer {
                 }
                 ProgramParseResult::TokenProgramAccount(parsing_result) => {
                     handle_token_program_account(
+                        account_info,
+                        parsing_result,
+                        &self.storage,
+                        &self.download_metadata_notifier,
+                    )
+                    .await
+                }
+                ProgramParseResult::TokenExtensionsProgramAccount(parsing_result) => {
+                    handle_token_extensions_program_account(
                         account_info,
                         parsing_result,
                         &self.storage,

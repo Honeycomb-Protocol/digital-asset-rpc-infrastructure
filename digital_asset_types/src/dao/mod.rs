@@ -2,6 +2,7 @@
 mod full_asset;
 mod generated;
 pub mod scopes;
+
 use self::sea_orm_active_enums::{
     OwnerType, RoyaltyTargetType, SpecificationAssetClass, SpecificationVersions,
 };
@@ -9,6 +10,7 @@ pub use full_asset::*;
 pub use generated::*;
 pub mod extensions;
 
+use log::debug;
 use sea_orm::{
     entity::*,
     sea_query::Expr,
@@ -93,11 +95,11 @@ impl SearchAssetsQuery {
                     .clone()
                     .map(|x| asset::Column::SpecificationAssetClass.eq(x)),
             )
-            .add_option(
-                self.owner_address
-                    .to_owned()
-                    .map(|x| asset::Column::Owner.eq(x)),
-            )
+            // .add_option(
+            //     self.owner_address
+            //         .to_owned()
+            //         .map(|x| asset::Column::Owner.eq(x)),
+            // )
             .add_option(
                 self.delegate
                     .to_owned()
@@ -142,20 +144,15 @@ impl SearchAssetsQuery {
             )
         }
 
-        if let Some(o) = self.owner_type.clone() {
-            conditions = conditions.add(asset::Column::OwnerType.eq(o));
-        } else {
-            // Default to NFTs
-            //
-            // In theory, the owner_type=single check should be sufficient,
-            // however there is an old bug that has marked some non-NFTs as "single" with supply > 1.
-            // The supply check guarentees we do not include those.
-            conditions = conditions.add_option(Some(
+        conditions =  match self.owner_type.clone().unwrap_or(OwnerType::Single) {
+            OwnerType::Single => conditions.add( // Assuming it is an NFT
                 asset::Column::OwnerType
                     .eq(OwnerType::Single)
                     .and(asset::Column::Supply.lte(1)),
-            ));
-        }
+            ),
+            OwnerType::Token => conditions.add(asset::Column::OwnerType.eq(OwnerType::Token)),
+            _ => conditions
+        };
 
         if let Some(c) = self.creator_address.to_owned() {
             conditions = conditions.add(asset_creators::Column::Creator.eq(c));
@@ -209,7 +206,22 @@ impl SearchAssetsQuery {
                 });
             joins.push(rel);
         }
-
+        if let Some(owner_address) = self.owner_address.to_owned() {
+            conditions = conditions.add(
+                Condition::any()
+                    .add(token_accounts::Column::Owner.eq(owner_address.clone()))
+                    .add(asset::Column::Owner.eq(owner_address)),
+            );
+            let rel = extensions::asset::Relation::AssetHolders
+                .def()
+                .on_condition(|left, right| {
+                    Expr::tbl(right, token_accounts::Column::Mint)
+                        .eq(Expr::tbl(left, asset::Column::Id))
+                        .into_condition()
+                });
+            joins.push(rel);
+        }
+  
         if let Some(ju) = self.json_uri.to_owned() {
             let cond = Condition::all().add(asset_data::Column::MetadataUrl.eq(ju));
             conditions = conditions.add(cond);
@@ -245,13 +257,10 @@ impl SearchAssetsQuery {
                 });
             joins.push(rel);
         }
-
-        Ok((
-            match self.negate {
-                None | Some(false) => conditions,
-                Some(true) => conditions.not(),
-            },
-            joins,
-        ))
+        conditions = match self.negate {
+            None | Some(false) => conditions,
+            Some(true) => conditions.not(),
+        };
+        Ok((conditions, joins))
     }
 }

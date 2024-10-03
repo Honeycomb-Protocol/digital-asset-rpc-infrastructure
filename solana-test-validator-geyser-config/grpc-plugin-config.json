@@ -33,9 +33,7 @@
                 "max": 1,
                 "account_include_max": 10,
                 "account_include_any": false,
-                "account_include_reject": [
-                    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-                ],
+                "account_include_reject": [],
                 "include_transactions": true,
                 "include_accounts": false,
                 "include_entries": false
