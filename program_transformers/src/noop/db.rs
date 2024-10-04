@@ -571,9 +571,8 @@ where
 
                     if let Some(JsonValue::Object(params)) = object.get("params") {
                         if let Some(JsonValue::String(id)) = params.get("mission_id") {
-                            mission_id = Some(String::from(id.clone()));
                             debug!("params = {:?} mission_id = {:?}", object, id);
-
+                            
                             // Remove the "pubkey:" prefix and convert the remaining part into a vector
                             let stripped_id = id.strip_prefix("pubkey:").ok_or_else(|| {
                                 ProgramTransformerError::ParsingError(
@@ -581,6 +580,7 @@ where
                                 )
                             })?;
                             debug!("stripped_id = {:?}", stripped_id);
+                            mission_id = Some(String::from(stripped_id));
 
                             let id_vec: Vec<u8> =
                                 bs58::decode(stripped_id).into_vec().map_err(|_| {
