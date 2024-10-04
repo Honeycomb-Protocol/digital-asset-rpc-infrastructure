@@ -561,6 +561,7 @@ where
         SchemaValue::Enum(kind, params) => {
             debug!("kind = {:?}", kind);
             let mut all_rewards: Vec<JsonValue> = Vec::new();
+            let mut mission_id: Option<String> = None;
 
             if let Some(event_participant_data) = event_participant_data {
                 debug!("event_participant_data = {:?}", event_participant_data);
@@ -570,6 +571,7 @@ where
 
                     if let Some(JsonValue::Object(params)) = object.get("params") {
                         if let Some(JsonValue::String(id)) = params.get("mission_id") {
+                            mission_id = Some(String::from(id.clone()));
                             debug!("params = {:?} mission_id = {:?}", object, id);
 
                             // Remove the "pubkey:" prefix and convert the remaining part into a vector
@@ -636,6 +638,7 @@ where
                     event_participant_ids.clone(),
                     all_rewards,
                     last_event_id,
+                    mission_id.as_deref(),
                 ))),
             );
         }
@@ -653,6 +656,7 @@ fn create_params(
     event_participant_ids: Vec<i64>,
     rewards: Vec<JsonValue>,
     last_event_id: Option<&i64>,
+    mission_id: Option<&str>,
 ) -> JsonValue {
     let mut new_map = Map::new();
 
@@ -662,6 +666,12 @@ fn create_params(
         JsonValue::String(pre_used_by_kind.to_string()),
     );
 
+    if let Some(mission_id) = mission_id {
+        new_map.insert(
+            "mission_id".into(),
+            JsonValue::String(mission_id.to_string()),
+        );
+    }
     // Convert `event_participant_ids` from Vec<i64> to JsonValue::Array
     let participant_ids_as_json_values = event_participant_ids
         .into_iter()
