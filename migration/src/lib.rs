@@ -47,6 +47,7 @@ mod m20240320_120101_add_mpl_core_info_items;
 mod m20240509_213421_add_character_history_table;
 mod m20240522_085331_create_compressed_data_changelog_table;
 mod m20240805_095941_add_canopy_depth_in_merkle_tree;
+mod m20240219_115532_add_extensions_column;
 
 pub mod model;
 
@@ -102,7 +103,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20240320_120101_add_mpl_core_info_items::Migration),
             Box::new(m20240509_213421_add_character_history_table::Migration),
             Box::new(m20240522_085331_create_compressed_data_changelog_table::Migration),
-            Box::new(m20240805_095941_add_canopy_depth_in_merkle_tree::Migration),
+            // Box::new(m20240805_095941_add_canopy_depth_in_merkle_tree::Migration),
+            Box::new(m20240219_115532_add_extensions_column::Migration),
         ]
     }
 }

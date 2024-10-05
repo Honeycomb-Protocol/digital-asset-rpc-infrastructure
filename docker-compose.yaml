@@ -91,6 +91,7 @@ services:
       - builder
     restart: always
     environment:
+      RUST_LOG: debug
       APP_DATABASE_URL: postgres://solana:solana@db/solana
       APP_SERVER_PORT: 9090
       # APP_METRICS_PORT: 8125
@@ -148,6 +149,7 @@ services:
       PLUGIN_MESSENGER_CONFIG.connection_config: '{redis_connection_str="redis://redis"}'
     ports:
       - "9093:8899"
+      - "9094:8900"
       - "9092:8900"
       - "10000:10000"
       # - "9092:8900"
