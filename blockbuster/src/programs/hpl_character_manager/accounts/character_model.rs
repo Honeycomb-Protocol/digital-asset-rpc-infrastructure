@@ -16,7 +16,7 @@ impl CharacterModel {
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
 pub enum CharacterConfig {
-    Wrapped(Vec<NftWrapCriteria>),
+    Wrapped(Vec<AssetCriteria>),
     Assembled {
         assembler_config: Pubkey,
         name: String,
@@ -25,11 +25,13 @@ pub enum CharacterConfig {
         creators: Vec<NftCreator>,
         seller_fee_basis_points: u16,
         collection_name: String,
+        mint_as: MintAs,
     },
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, ToSchema, PartialEq)]
-pub enum NftWrapCriteria {
+pub enum AssetCriteria {
+    Prepopulated,
     Collection(Pubkey),
     Creator(Pubkey),
     MerkleTree(Pubkey),
@@ -39,4 +41,12 @@ pub enum NftWrapCriteria {
 pub struct NftCreator {
     pub address: Pubkey,
     pub share: u8,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
+pub enum MintAs {
+    MplCore,
+    MplMetadata,
+    MplBubblegum { merkle_tree: Pubkey },
+    TokenExtensions,
 }
