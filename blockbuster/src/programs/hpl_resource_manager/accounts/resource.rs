@@ -25,16 +25,36 @@ impl Resource {
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
 pub enum ResourceStorage {
     AccountState,
-    LedgerState { merkle_trees: ControlledMerkleTrees },
+    LedgerState {
+        merkle_trees: ControlledMerkleTrees,
+        promise_supply: u64,
+    },
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
 pub enum ResourceKind {
-    HplFungible { decimals: u8 },
+    Exported,
 
-    HplNonFungible { characteristics: Vec<String> },
+    HplFungible {
+        decimals: u8,
+    },
 
-    WrappedFungible { decimals: u8 },
+    HplNonFungible {
+        characteristics: Vec<String>,
+    },
 
-    WrappedMplCore { characteristics: Vec<String> },
+    WrappedFungible {
+        decimals: u8,
+        custody: ResourceCustody,
+    },
+
+    WrappedMplCore {
+        characteristics: Vec<String>,
+    },
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
+pub enum ResourceCustody {
+    Authority,
+    Supply { burner_destination: Option<Pubkey> },
 }

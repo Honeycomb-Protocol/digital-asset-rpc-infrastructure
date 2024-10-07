@@ -6,7 +6,7 @@ use std::net::UdpSocket;
 
 #[derive(Clone, Parser, Debug)]
 pub struct MetricsArgs {
-    #[arg(long, env, default_value = "127.0.0.1")]
+    #[arg(long, env, default_value = "0.0.0.0")]
     pub metrics_host: String,
     #[arg(long, env, default_value = "8125")]
     pub metrics_port: u16,
