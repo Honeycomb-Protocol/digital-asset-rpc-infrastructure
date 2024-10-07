@@ -1,0 +1,16 @@
+route:
+  receiver: "email"
+  repeat_interval: 4h
+  group_by: [alertname]
+
+receivers:
+  - name: "email"
+    email_configs:
+      - to: "${EMAIL_TO}" # Recipient email address
+        from: "${EMAIL_FROM}" # Sender email address (same as smtp_from)
+        smarthost: "${SMART_HOST}:${SMART_PORT}" # SMTP server and port (same as smtp_smarthost)
+        auth_username: "${AUTH_USERNAME}" # SMTP auth username (same as smtp_auth_username)
+        auth_password: "${AUTH_PASSWORD}" # SMTP auth password (same as smtp_auth_password)
+        require_tls: true
+        tls_config:
+          insecure_skip_verify: true
