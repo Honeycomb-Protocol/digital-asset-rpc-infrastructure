@@ -1,9 +1,9 @@
 use crate::{
     asset_upserts::{upsert_assets_token_account_columns, AssetTokenAccountColumns},
     error::ProgramTransformerError,
+    record_metric,
     token::upsert_owner_for_token_account,
     AccountInfo,
-
 };
 use blockbuster::programs::token_extensions::TokenAccount;
 use cadence_macros::statsd_count;
@@ -11,7 +11,6 @@ use digital_asset_types::dao::asset;
 use sea_orm::{entity::*, query::*, ActiveValue::Set, DatabaseConnection, EntityTrait};
 use solana_sdk::program_option::COption;
 use spl_token_2022::state::AccountState;
-
 
 pub async fn handle_token2022_token_account<'a, 'b, 'c>(
     ta: &TokenAccount,
@@ -46,7 +45,6 @@ pub async fn handle_token2022_token_account<'a, 'b, 'c>(
         account_owner,
     )
     .await?;
-
 
     // Metrics
     let mut token_owner_update = false;
@@ -106,7 +104,7 @@ pub async fn handle_token2022_token_account<'a, 'b, 'c>(
                         frozen,
                         delegate,
                         slot_updated_token_account: Some(account_info.slot as i64),
-                        mint_extensions: Set(Some(token_extensions))
+                        mint_extensions: Set(Some(token_extensions)),
                     },
                     &txn,
                 )
@@ -118,13 +116,13 @@ pub async fn handle_token2022_token_account<'a, 'b, 'c>(
 
     // Publish metrics outside of the txn to reduce txn latency.
     if token_owner_update {
-        statsd_count!("token_account.owner_update", 1);
+        record_metric(&"token_account.owner_update", true, 0);
     }
     if token_delegate_update {
-        statsd_count!("token_account.delegate_update", 1);
+        record_metric(&"token_account.delegate_update", true, 0);
     }
     if token_freeze_update {
-        statsd_count!("token_account.freeze_update", 1);
+        record_metric(&"token_account.freeze_update", true, 0);
     }
 
     Ok(())
