@@ -76,6 +76,8 @@ pub enum OwnerType {
     Single,
     #[sea_orm(string_value = "token")]
     Token,
+    #[sea_orm(string_value = "all")]
+    All,
     #[sea_orm(string_value = "unknown")]
     Unknown,
 }

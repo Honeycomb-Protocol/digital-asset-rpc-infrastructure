@@ -55,6 +55,7 @@ pub struct Model {
     pub mpl_core_collection_num_minted: Option<i32>,
     pub mpl_core_collection_current_size: Option<i32>,
     pub mpl_core_plugins_json_version: Option<i32>,
+    pub mint_extensions: Option<Json>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveColumn)]
@@ -96,6 +97,7 @@ pub enum Column {
     MplCoreCollectionNumMinted,
     MplCoreCollectionCurrentSize,
     MplCorePluginsJsonVersion,
+    MintExtensions,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DerivePrimaryKey)]
@@ -154,6 +156,7 @@ impl ColumnTrait for Column {
             Self::MplCoreCollectionNumMinted => ColumnType::Integer.def().null(),
             Self::MplCoreCollectionCurrentSize => ColumnType::Integer.def().null(),
             Self::MplCorePluginsJsonVersion => ColumnType::Integer.def().null(),
+            Self::MintExtensions => ColumnType::JsonBinary.def().null(),
         }
     }
 }

@@ -35,7 +35,7 @@ impl ParseResult for HplHiveControlAccount {
         ProgramParseResult::HplHiveControl(self)
     }
 }
-
+#[derive(Clone)]
 pub struct HplHiveControlParser;
 
 impl ProgramParser for HplHiveControlParser {

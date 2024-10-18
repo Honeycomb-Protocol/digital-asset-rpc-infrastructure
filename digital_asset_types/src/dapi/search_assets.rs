@@ -24,6 +24,7 @@ pub async fn search_assets(
         &pagination,
         page_options.limit,
         options.show_unverified_collections,
+        search_assets_query.owner_address
     )
     .await?;
     Ok(build_asset_response(

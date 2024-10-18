@@ -122,4 +122,4 @@ args=(
 
 
 apt update && apt install ca-certificates -y && update-ca-certificates
-solana-test-validator  "${programs[@]}" "${args[@]}" $SOLANA_RUN_SH_VALIDATOR_ARGS > /dev/null
+solana-test-validator  "${programs[@]}" "${args[@]}" $SOLANA_RUN_SH_VALIDATOR_ARGS >> /dev/null

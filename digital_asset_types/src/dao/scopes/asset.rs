@@ -4,7 +4,7 @@ use crate::{
         asset_authority, asset_creators, asset_data, asset_grouping, cl_audits_v2,
         extensions::{self, instruction::PascalCase},
         sea_orm_active_enums::Instruction,
-        Cursor, FullAsset, GroupingSize, Pagination,
+        token_accounts, tokens, Cursor, FullAsset, GroupingSize, Pagination,
     },
     rpc::filter::AssetSortDirection,
 };
@@ -78,6 +78,7 @@ pub async fn get_by_creator(
         limit,
         show_unverified_collections,
         Some(creator),
+        None
     )
     .await
 }
@@ -138,6 +139,7 @@ pub async fn get_by_grouping(
         limit,
         show_unverified_collections,
         None,
+        None
     )
     .await
 }
@@ -152,7 +154,7 @@ pub async fn get_assets_by_owner(
     show_unverified_collections: bool,
 ) -> Result<Vec<FullAsset>, DbErr> {
     let cond = Condition::all()
-        .add(asset::Column::Owner.eq(owner))
+        .add(asset::Column::Owner.eq(owner.clone()))
         .add(asset::Column::Supply.gt(0));
     get_assets_by_condition(
         conn,
@@ -163,6 +165,7 @@ pub async fn get_assets_by_owner(
         pagination,
         limit,
         show_unverified_collections,
+        Some(owner)
     )
     .await
 }
@@ -186,6 +189,7 @@ pub async fn get_assets(
         pagination,
         limit,
         false,
+        None
     )
     .await
 }
@@ -212,6 +216,7 @@ pub async fn get_by_authority(
         limit,
         show_unverified_collections,
         None,
+        None
     )
     .await
 }
@@ -227,6 +232,7 @@ async fn get_by_related_condition<E>(
     limit: u64,
     show_unverified_collections: bool,
     required_creator: Option<Vec<u8>>,
+    include_owner: Option<Vec<u8>>,
 ) -> Result<Vec<FullAsset>, DbErr>
 where
     E: RelationTrait,
@@ -244,7 +250,7 @@ where
     let assets = paginate(pagination, limit, stmt, sort_direction, asset::Column::Id)
         .all(conn)
         .await?;
-    get_related_for_assets(conn, assets, show_unverified_collections, required_creator).await
+    get_related_for_assets(conn, assets, show_unverified_collections, required_creator, include_owner).await
 }
 
 pub async fn get_related_for_assets(
@@ -252,6 +258,7 @@ pub async fn get_related_for_assets(
     assets: Vec<asset::Model>,
     show_unverified_collections: bool,
     required_creator: Option<Vec<u8>>,
+    include_owner: Option<Vec<u8>>,
 ) -> Result<Vec<FullAsset>, DbErr> {
     let asset_ids = assets.iter().map(|a| a.id.clone()).collect::<Vec<_>>();
 
@@ -278,6 +285,8 @@ pub async fn get_related_for_assets(
                 authorities: vec![],
                 creators: vec![],
                 groups: vec![],
+                token: None,
+                token_account: None,
             };
             acc.insert(id, fa);
         };
@@ -297,6 +306,39 @@ pub async fn get_related_for_assets(
     for c in creators.into_iter() {
         if let Some(asset) = assets_map.get_mut(&c.asset_id) {
             asset.creators.push(c);
+        }
+    }
+
+    // Get all creators for all assets in `assets_map``.
+    let tokens = tokens::Entity::find()
+        .filter(tokens::Column::Mint.is_in(ids.clone()))
+        .order_by_asc(tokens::Column::Mint)
+        .all(conn)
+        .await?;
+
+    // Add the tokens to the assets in `asset_map``.
+    for c in tokens.into_iter() {
+        if let Some(asset) = assets_map.get_mut(&c.mint) {
+            asset.token = Some(c);
+        }
+    }
+    if let Some(include_owner) = include_owner {
+        // Get all creators for all assets in `assets_map``.
+        let token_accounts = token_accounts::Entity::find()
+            .filter(
+                Condition::all()
+                    .add(token_accounts::Column::Mint.is_in(ids.clone()))
+                    .add(token_accounts::Column::Owner.eq(include_owner)),
+            )
+            .order_by_asc(token_accounts::Column::Mint)
+            .all(conn)
+            .await?;
+
+        // Add the token_accounts to the assets in `asset_map``.
+        for c in token_accounts.into_iter() {
+            if let Some(asset) = assets_map.get_mut(&c.mint) {
+                asset.token_account = Some(c);
+            }
         }
     }
 
@@ -361,6 +403,8 @@ pub async fn get_assets_by_condition(
     pagination: &Pagination,
     limit: u64,
     show_unverified_collections: bool,
+    include_owner: Option<Vec<u8>>,
+
 ) -> Result<Vec<FullAsset>, DbErr> {
     let mut stmt = asset::Entity::find();
     for def in joins {
@@ -377,7 +421,7 @@ pub async fn get_assets_by_condition(
         .all(conn)
         .await?;
     let full_assets =
-        get_related_for_assets(conn, assets, show_unverified_collections, None).await?;
+        get_related_for_assets(conn, assets, show_unverified_collections, None, include_owner).await?;
     Ok(full_assets)
 }
 
@@ -396,6 +440,11 @@ pub async fn get_by_id(
             Some((a, Some(d))) => Ok((a, d)),
             _ => Err(DbErr::RecordNotFound("Asset Not Found".to_string())),
         })?;
+
+    let mut token = tokens::Entity::find()
+        .filter(tokens::Column::Mint.eq(asset_id.clone()))
+        .one(conn)
+        .await?;
 
     let (asset, data) = asset_data;
     let authorities: Vec<asset_authority::Model> = asset_authority::Entity::find()
@@ -430,6 +479,8 @@ pub async fn get_by_id(
         authorities,
         creators,
         groups: grouping,
+        token,
+        token_account: None,
     })
 }
 

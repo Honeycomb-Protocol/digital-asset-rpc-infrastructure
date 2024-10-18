@@ -16,9 +16,7 @@ use {
     tracing::warn,
     yellowstone_grpc_client::GeyserGrpcClient,
     yellowstone_grpc_proto::{
-        geyser::{SubscribeRequest, SubscribeUpdateTransaction},
-        prelude::subscribe_update::UpdateOneof,
-        prost::Message,
+        geyser::SubscribeRequest, prelude::subscribe_update::UpdateOneof, prost::Message,
     },
     yellowstone_grpc_tools::config::GrpcRequestToProto,
 };
@@ -56,19 +54,20 @@ pub async fn try_streaming_grpc_loop(
         transactions,
         ..Default::default()
     };
-    debug!(
+    error!(
         "subscribing to client {:?}, status {:?}",
         endpoint,
         client.health_check().await?
     );
     match client.subscribe_with_request(Some(request)).await {
         Ok((_subscribe_tx, mut stream)) => {
-            debug!("subscribtion sent to client {}", endpoint.1);
+            error!("subscribtion sent to client {}", endpoint.1);
 
             while let Some(resp) = stream.next().await {
                 match resp {
                     Ok(msg) => {
                         if let Some(update) = msg.update_oneof {
+                            error!("Got Data {:?}", update);
                             tx.send(GrpcStream {
                                 endpoint_index: endpoint.0,
                                 update,
@@ -146,54 +145,12 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
     let deadline = sleep(config.redis.pipeline_max_idle);
     tokio::pin!(deadline);
 
-    let mut pending_update_events =
-        HashMap::<String, (u8, std::time::SystemTime, SubscribeUpdateTransaction)>::new();
-    let mut seen_update_events = LruCache::<String, u64>::new(
+    let mut seen_update_events = LruCache::<String, ()>::new(
         NonZeroUsize::new(config.solana_seen_event_cache_max_size).expect("Non zero value"),
     );
 
-    let mut interval = tokio::time::interval(Duration::from_secs(10));
     let result = loop {
         tokio::select! {
-            _ = interval.tick() => {
-                let desired_time = std::time::SystemTime::now() - std::time::Duration::from_secs(10);
-                info!("[PENDING_LOOP] Pending Txs {}", pending_update_events.len());
-                pending_update_events = pending_update_events.into_iter().fold(HashMap::new(), |mut map, (slot_signature, (endpoint_index, timestamp, transaction))| {
-
-                    if timestamp > desired_time {
-                        info!("[PENDING_LOOP] Retaining tx: {} {}", endpoint_index, &slot_signature);
-                        map.insert(slot_signature, (endpoint_index, timestamp, transaction));
-                        return map;
-                    }
-
-                    info!("[PENDING_LOOP] Consuming tx: {} {}", endpoint_index, &slot_signature);
-                    seen_update_events.put(slot_signature.to_owned(), 1);
-
-                    pipe.xadd_maxlen(
-                        &config.transactions.stream,
-                        StreamMaxlen::Approx(config.transactions.stream_maxlen),
-                        "*",
-                        &[(
-                            &config.transactions.stream_data_key,
-                            transaction.encode_to_vec(),
-                        )],
-                    );
-
-                    pipe.xadd_maxlen(
-                        &String::from("TXN_CACHE"),
-                        StreamMaxlen::Approx(config.transactions.stream_maxlen),
-                        "*",
-                        &[(
-                            &config.transactions.stream_data_key,
-                            [vec![endpoint_index], transaction.encode_to_vec()].concat(),
-                        )],
-                    );
-
-                    pipe_transactions += 1;
-                    map
-                });
-                info!("[PENDING_LOOP] Remaining Pending Txs {}", pending_update_events.len());
-            },
             result = &mut jh_metrics_xlen => match result {
                 Ok(Ok(_)) => unreachable!(),
                 Ok(Err(error)) => break Err(error),
@@ -208,13 +165,11 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
                     UpdateOneof::Account(account) => {
                         let slot_pubkey = format!("{}:{}", account.slot, hex::encode(account.account.as_ref().map(|account| account.pubkey.clone()).unwrap_or_default()));
 
-                        if let Some(cache) = seen_update_events.get_mut(&slot_pubkey) {
-                            *cache += 1;
-                            // seen_update_events.put(slot_pubkey, *cache);
+                        if seen_update_events.get(&slot_pubkey).is_some() {
                             continue;
                         } else {
                             debug!("Adding new account: {}", &slot_pubkey);
-                            seen_update_events.put(slot_pubkey, 1);
+                            seen_update_events.put(slot_pubkey, ());
                         };
 
                         pipe.xadd_maxlen(
@@ -239,20 +194,13 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
 
                         let slot_signature = hex::encode(transaction.transaction.as_ref().map(|t| t.signature.clone()).unwrap_or_default()).to_string();
 
-                        if let Some(cache) = seen_update_events.get_mut(&slot_signature) {
-                            *cache += 1;
+                        if seen_update_events.get(&slot_signature).is_some() {
                             continue;
-                        }
+                        } else {
+                            info!("Adding new tx: {} {}", endpoint_index, &slot_signature);
 
-                        if pending_update_events.get(&slot_signature).is_none() {
-                            info!("Pushing into pending TXs tx: {} {}", endpoint_index, &slot_signature);
-                            pending_update_events.insert(slot_signature, (endpoint_index, std::time::SystemTime::now(), transaction));
-                            continue;
-                        }
-
-                        info!("Adding new tx: {} {}", endpoint_index, &slot_signature);
-                        pending_update_events.remove(&slot_signature);
-                        seen_update_events.put(slot_signature, 1);
+                            seen_update_events.put(slot_signature, ());
+                        };
 
                         pipe.xadd_maxlen(
                             &config.transactions.stream,

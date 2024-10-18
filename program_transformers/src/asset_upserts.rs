@@ -6,18 +6,19 @@ use {
         },
     },
     sea_orm::{
-        sea_query::OnConflict, ConnectionTrait, DbBackend, DbErr, EntityTrait, QueryTrait, Set,
-        TransactionTrait,
+        sea_query::OnConflict, ActiveValue, ConnectionTrait, DbBackend, DbErr, EntityTrait, QueryTrait, Set, TransactionTrait
     },
     serde_json::value::Value,
 };
 
+#[derive(Default)]
 pub struct AssetTokenAccountColumns {
     pub mint: Vec<u8>,
     pub owner: Option<Vec<u8>>,
     pub frozen: bool,
     pub delegate: Option<Vec<u8>>,
     pub slot_updated_token_account: Option<i64>,
+    pub mint_extensions: ActiveValue<Option<serde_json::value::Value>>,
 }
 
 pub async fn upsert_assets_token_account_columns<T: ConnectionTrait + TransactionTrait>(
@@ -30,6 +31,7 @@ pub async fn upsert_assets_token_account_columns<T: ConnectionTrait + Transactio
         frozen: Set(columns.frozen),
         delegate: Set(columns.delegate),
         slot_updated_token_account: Set(columns.slot_updated_token_account),
+        mint_extensions: columns.mint_extensions,
         ..Default::default()
     };
     let mut query = asset::Entity::insert(active_model)

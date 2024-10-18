@@ -31,3 +31,5 @@ solana airdrop 10000 6knLqX76cM9acs5LFB6otAp8ux1mYupt2YVt5QjAhXrX -u http://loca
 # solana airdrop 10 -k keys/user.json
 # solana airdrop 10 -k key.json
 # yarn ts-node scripts/createGlobal.ts
+
+docker compose down transactions-backfiller accounts-backfiller

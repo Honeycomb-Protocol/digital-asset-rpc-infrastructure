@@ -331,6 +331,7 @@ pub async fn save_v1_asset<T: ConnectionTrait + TransactionTrait>(
             // Note use transfer delegate for the existing delegate field.
             delegate: transfer_delegate.clone(),
             slot_updated_token_account: Some(slot_i),
+            ..Default::default()
         },
         &txn,
     )

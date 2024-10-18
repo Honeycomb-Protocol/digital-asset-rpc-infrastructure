@@ -20,20 +20,13 @@ impl Recipe {
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
-pub enum Ingredient {
-    Fungible { mint: Pubkey, amount: u64 },
-    INF { mint: Pubkey, amount: u64 },
+pub struct Ingredient {
+    pub resource_address: Pubkey,
+    pub amount: u64,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
-pub enum Meal {
-    Fungible {
-        mint: Pubkey,
-        amount: u64,
-    },
-    INF {
-        mint: Pubkey,
-        amount: u64,
-        characteristics: VecMap<String, String>,
-    },
+pub struct Meal {
+    pub resource_address: Pubkey,
+    pub amount: u64,
 }

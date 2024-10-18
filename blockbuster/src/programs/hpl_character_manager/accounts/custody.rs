@@ -1,4 +1,4 @@
-use super::NftWrapCriteria;
+use super::AssetCriteria;
 use anchor_lang::prelude::*;
 use hpl_toolkit::prelude::*;
 
@@ -23,7 +23,7 @@ impl AssetCustody {
 pub enum CharacterSource {
     Wrapped {
         mint: Pubkey,
-        criteria: NftWrapCriteria,
+        criteria: AssetCriteria,
         is_compressed: bool,
     },
     Assembled {

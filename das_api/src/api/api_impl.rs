@@ -483,6 +483,7 @@ impl ApiContract for DasApi {
         let owner_type = owner_type.map(|x| match x {
             OwnershipModel::Single => OwnerType::Single,
             OwnershipModel::Token => OwnerType::Token,
+            OwnershipModel::All => OwnerType::All,
         });
         let royalty_target_type = royalty_target_type.map(|x| match x {
             RoyaltyModel::Creators => RoyaltyTargetType::Creators,

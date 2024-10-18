@@ -47,6 +47,8 @@ pub enum Interface {
     MplCoreAsset,
     #[serde(rename = "MplCoreCollection")]
     MplCoreCollection,
+    #[serde(rename = "FungibleToken")]
+    FungibleToken,
 }
 
 impl From<(&SpecificationVersions, &SpecificationAssetClass)> for Interface {
@@ -281,6 +283,8 @@ pub enum OwnershipModel {
     Single,
     #[serde(rename = "token")]
     Token,
+    #[serde(rename = "all")]
+    All,
 }
 
 impl From<String> for OwnershipModel {
@@ -357,6 +361,26 @@ pub struct Supply {
     pub edition_nonce: Option<u64>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
+pub struct TokenInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub balance: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supply: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decimals: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_program: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub associated_token_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mint_authority: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub freeze_authority: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delegated_balance: Option<u64>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MplCoreInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -394,4 +418,8 @@ pub struct Asset {
     pub unknown_plugins: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mpl_core_info: Option<MplCoreInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mint_extensions: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_info: Option<TokenInfo>,
 }
