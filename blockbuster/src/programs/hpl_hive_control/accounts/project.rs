@@ -3,6 +3,7 @@ use hpl_toolkit::prelude::*;
 use spl_account_compression::Node;
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
+
 pub struct Project {
     pub bump: u8,
     pub authority: Pubkey,
@@ -14,7 +15,11 @@ pub struct Project {
     pub profile_data_config: ProfileDataConfig,
     pub profile_trees: ControlledMerkleTrees,
     pub badge_criteria: Option<Vec<BadgeCriteria>>,
-    pub subsidy_fees: bool,
+    pub subsidize_fees: bool,
+}
+
+impl Project {
+    pub const DISCRIMINATOR: [u8; 8] = [205, 168, 189, 202, 181, 247, 142, 19];
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
@@ -30,14 +35,13 @@ pub enum BadgeCriteriaCondition {
     Public,
     Whitelisted { root: Node },
 }
-impl Project {
-    pub const DISCRIMINATOR: [u8; 8] = [205, 168, 189, 202, 181, 247, 142, 19];
-}
+
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
 pub struct ProfileDataConfig {
-    pub achievements: Vec<String>,
-    pub custom_data_fields: Vec<String>,
+    pub achievements: Vec<ShortString>,
+    pub custom_data_fields: Vec<ShortString>,
 }
+
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
 pub enum Service {
     Assembler { assembler_id: Pubkey },
