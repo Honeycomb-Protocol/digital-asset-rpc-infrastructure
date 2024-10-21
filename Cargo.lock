@@ -2848,13 +2848,14 @@ dependencies = [
 
 [[package]]
 name = "hpl-toolkit"
-version = "0.0.3-beta.34"
+version = "0.0.3-beta.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "878fb8926d1f7246bd16257448ba47673e665045f4550436f51d46eae7784471"
+checksum = "f1577b44b4f1fbe25b424359cf0aa8b1fc841dc5d1f768a85af1e8020a79736c"
 dependencies = [
  "anchor-lang",
  "hpl-toolkit-attribute-account-schemas-ix-injector",
  "hpl-toolkit-attribute-compressed-account",
+ "hpl-toolkit-attribute-honeycomb-context",
  "hpl-toolkit-derive-to-node",
  "hpl-toolkit-derive-to-schema",
  "hpl-toolkit-macro-add-service",
@@ -2884,6 +2885,18 @@ name = "hpl-toolkit-attribute-compressed-account"
 version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5d8a228a87ddc6085db7fc13008d0aa84c3b7b3d54df3d2527d49b519acc22c"
+dependencies = [
+ "convert_case",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.61",
+]
+
+[[package]]
+name = "hpl-toolkit-attribute-honeycomb-context"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff0027d2a5341dbfe4eaf041c7afae32183c5ec33ec2622f670c0c43b10e459e"
 dependencies = [
  "convert_case",
  "proc-macro2",
