@@ -181,7 +181,7 @@ impl ProgramTransformer {
         &self,
         tx_info: &TransactionInfo,
     ) -> ProgramTransformerResult<()> {
-        info!("Handling Transaction: {:?}", tx_info.signature);
+        error!("Handling Transaction: {:?} {:?}", tx_info.signature, tx_info.slot);
         let instructions = self.break_transaction(tx_info);
         let mut not_impl = 0;
         let ixlen = instructions.len();

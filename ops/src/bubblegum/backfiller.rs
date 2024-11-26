@@ -5,9 +5,11 @@ use clap::Parser;
 use das_core::{connect_db, setup_metrics, MetricsArgs, PoolArgs, QueueArgs, Rpc, SolanaRpcArgs};
 use das_grpc_ingest::create_download_metadata_notifier;
 use digital_asset_types::dao::cl_audits_v2;
+use futures::stream::FuturesOrdered;
 use futures::{stream::FuturesUnordered, StreamExt};
 use indicatif::HumanDuration;
 use log::{debug, error, info};
+use program_transformers::error::ProgramTransformerError;
 use program_transformers::{ProgramTransformer, TransactionInfo};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, SqlxPostgresConnector};
 use solana_sdk::instruction::CompiledInstruction;
@@ -71,6 +73,10 @@ pub struct Args {
     /// The public key of the program to backfill
     #[arg(long, env, value_parser = parse_pubkey, use_value_delimiter = true)]
     pub programs: Option<Vec<Pubkey>>,
+
+    /// Wether to index only honeycomb related trees
+    #[arg(long, env, default_value = "false")]
+    pub only_honeycomb: bool,
 }
 
 fn parse_pubkey(s: &str) -> Result<Pubkey, &'static str> {
@@ -125,6 +131,7 @@ pub async fn run(config: Args) -> Result<()> {
 
     // Tree Worker
     let tree_solana_rpc = solana_rpc.clone();
+    let tree_pool = pool.clone();
     let (tree_sender, mut tree_reciever) = mpsc::channel::<TreeResponse>(config.gap_channel_size);
     let tree_worker_count = 10;
     let tree_worker_manager = tokio::spawn(async move {
@@ -135,7 +142,7 @@ pub async fn run(config: Args) -> Result<()> {
             if handlers.len() >= tree_worker_count {
                 handlers.next().await;
             }
-            let pool = pool.clone();
+            let pool = tree_pool.clone();
             let solana_rpc = tree_solana_rpc.clone();
             let handle = spawn_tree_worker(
                 pool,
@@ -159,15 +166,18 @@ pub async fn run(config: Args) -> Result<()> {
     let trees = if let Some(only_trees) = config.only_trees {
         debug!("Backfilling only {:?}", only_trees);
         TreeResponse::find(&solana_rpc, only_trees, &programs).await?
+    } else if config.only_honeycomb {
+        let only_trees = super::hc_trees::fetch_hc_trees(pool).await?;
+        TreeResponse::find(&solana_rpc, only_trees, &programs).await?
     } else {
         debug!("Backfilling all trees");
-        TreeResponse::all(&solana_rpc, &programs, config.ignore_bgum).await?
+        TreeResponse::all(&solana_rpc, &programs, config.ignore_bgum, false).await?
     };
 
     let tree_count = trees.len();
     let mut tree_errored: usize = 0;
 
-    info!(
+    error!(
         "fetched {} trees in {}",
         tree_count,
         HumanDuration(started.elapsed())
@@ -176,7 +186,7 @@ pub async fn run(config: Args) -> Result<()> {
     for tree in trees {
         let tree_id = tree.pubkey.to_string();
         match tree_sender.send(tree).await {
-            Ok(_) => debug!("Sent tree {} to worker", tree_id),
+            Ok(_) => error!("Sent tree {} to worker", tree_id),
             Err(e) => {
                 tree_errored += 1;
                 error!("While sending tree {} to worker: {:?}", tree_id, e)
@@ -186,7 +196,7 @@ pub async fn run(config: Args) -> Result<()> {
     drop(tree_sender);
 
     tree_worker_manager.await?;
-    info!(
+    error!(
         "crawled {}/{} trees in {}",
         tree_count - tree_errored,
         tree_count,
@@ -208,28 +218,50 @@ fn spawn_tree_worker(
         // Specific Transaction worker for this tree
         let transaction_solana_rpc = client.clone();
         let (sig_sender, mut sig_receiver) = mpsc::channel::<Signature>(signature_channel_size);
-        let transaction_worker_manager = tokio::spawn(async move {
-            let mut handlers = FuturesUnordered::new();
-
+        let transaction_worker_manager: JoinHandle<Vec<TransactionInfo>> = tokio::spawn(async move {
+            let mut handlers = FuturesOrdered::new();
+            let mut handled = vec![];
             while let Some(signature) = sig_receiver.recv().await {
                 if handlers.len() >= transaction_worker_count {
-                    handlers.next().await;
+                    match handlers.next().await {
+                        Some(Ok(Some(d)))  => {
+                            statsd_count!("transaction.succeeded", 1);
+                            handled.push(d)
+                        },
+                        Some(Err(e)) => {
+                            error!("queue transaction: {:?}", e);
+                            statsd_count!("transaction.failed", 1);
+                            break;
+                        },
+                        _ => {}
+                    } 
                 }
 
                 let solana_rpc = transaction_solana_rpc.clone();
 
                 let handle = spawn_transaction_worker(solana_rpc, signature);
 
-                handlers.push(handle);
+                handlers.push_back(handle);
             }
-
-            futures::future::join_all(handlers).await
+            while let Some(handler) = handlers.next().await {
+                match handler {
+                    Ok(Some(d))  => {
+                        statsd_count!("transaction.succeeded", 1);
+                        handled.push(d)
+                    },
+                    Err(e) => {
+                        error!("queue transaction: {:?}", e);
+                        statsd_count!("transaction.failed", 1);
+                        break;
+                    },
+                    Ok(None) => continue
+                } 
+            }
+            handled
         });
 
-        let gap_worker_sig_sender = sig_sender.clone();
         let gap_worker_manager = tokio::spawn(async move {
             let client = client.clone();
-            let sig_sender = gap_worker_sig_sender.clone();
             let timing = Instant::now();
 
             let conn = SqlxPostgresConnector::from_sqlx_postgres_pool(pool);
@@ -299,14 +331,17 @@ fn spawn_tree_worker(
 
             Ok::<(), anyhow::Error>(())
         });
-        drop(sig_sender);
         gap_worker_manager.await??;
 
-        let transactions = transaction_worker_manager.await?;
-
+        let mut transactions = transaction_worker_manager.await?;
+        transactions.reverse();
         for transaction in transactions {
-            if let Ok(Some(transaction)) = transaction {
-                program_transformer.handle_transaction(&transaction).await?;
+            match program_transformer.handle_transaction(&transaction).await {
+                Ok(_) => continue,
+                Err(ProgramTransformerError::NotImplemented) => continue,
+                Err(e) => {
+                    return Err(e.into());
+                }
             }
         }
 
@@ -384,22 +419,12 @@ fn spawn_transaction_worker(
     client: Rpc,
     signature: Signature,
 ) -> JoinHandle<Option<TransactionInfo>> {
+    error!("Spawn transaction {}", signature);
     tokio::spawn(async move {
         let timing = Instant::now();
 
-        let r = match fetch_and_parse_transaction(client, signature).await {
-            Ok(transaction) => {
-                statsd_count!("transaction.succeeded", 1);
-                transaction
-            }
-            Err(e) => {
-                error!("queue transaction: {:?}", e);
-
-                statsd_count!("transaction.failed", 1);
-                None
-            }
-        };
-
+        let r =  fetch_and_parse_transaction(client, signature).await.unwrap();
+        
         statsd_time!("transaction.queued", timing.elapsed());
 
         r

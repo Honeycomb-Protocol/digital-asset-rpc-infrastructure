@@ -22,7 +22,7 @@ pub enum CharacterConfig {
         name: String,
         symbol: String,
         description: String,
-        creators: Vec<NftCreator>,
+        creators: Vec<MplMetadataCreator>,
         seller_fee_basis_points: u16,
         collection_name: String,
         mint_as: MintAs,
@@ -38,7 +38,7 @@ pub enum AssetCriteria {
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
-pub struct NftCreator {
+pub struct MplMetadataCreator {
     pub address: Pubkey,
     pub share: u8,
 }

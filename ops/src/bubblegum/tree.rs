@@ -142,7 +142,6 @@ impl TreeGapFill {
 
     pub async fn crawl(&self, client: Rpc, sender: Sender<Signature>) -> Result<()> {
         let mut before = self.before;
-
         loop {
             let sigs = client
                 .get_signatures_for_address(&self.tree, before, self.until)
@@ -208,6 +207,7 @@ impl TreeResponse {
         account: Account,
         programs: &Vec<Pubkey>,
         ignore_bgum: bool,
+        ignore_auth_check: bool,
     ) -> Result<Self> {
         let bytes = account.data.as_slice();
 
@@ -220,36 +220,48 @@ impl TreeResponse {
 
         let seq_bytes = tree_bytes[0..8].try_into()?;
         let seq = u64::from_le_bytes(seq_bytes);
-        let hc_vault = pubkey!("DvgYMZV4EvTcNER75gJv29Go7ghByhFPCKiGAxpzytFs");
 
-        debug!("Checking hc_vault as auth");
-        let mut auth_result = header.assert_valid_authority(&hc_vault);
+        if !ignore_auth_check {
+            let hc_vault = pubkey!("DvgYMZV4EvTcNER75gJv29Go7ghByhFPCKiGAxpzytFs");
+            debug!("Checking hc_vault as auth");
+            let mut auth_result = header.assert_valid_authority(&hc_vault);
 
-        if auth_result.is_err() && !ignore_bgum {
-            debug!("Checking bgum as auth");
-            let (bgum_auth, _) =
-                Pubkey::find_program_address(&[pubkey.as_ref()], &mpl_bubblegum::ID);
-            auth_result = header.assert_valid_authority(&bgum_auth);
-        }
+            if auth_result.is_err() && !ignore_bgum {
+                debug!("Checking bgum as auth");
+                let (bgum_auth, _) =
+                    Pubkey::find_program_address(&[pubkey.as_ref()], &mpl_bubblegum::ID);
+                auth_result = header.assert_valid_authority(&bgum_auth);
+            }
 
-        if programs.len() > 0 && auth_result.is_err() {
-            debug!("Checking tree authority owner for tree {:?}", pubkey);
             header.assert_valid()?;
             let mut pubkey_bytes = [0; 32];
             pubkey_bytes.copy_from_slice(&header_bytes.to_vec()[10..42]);
             let tree_authority = Pubkey::from(pubkey_bytes);
             debug!("Tree authority {:?}", tree_authority);
 
-            let tree_authority_acc = client.get_account(&tree_authority).await?.value;
-            if let Some(tree_authority_acc) = tree_authority_acc {
-                if !programs.contains(&tree_authority_acc.owner) {
+            if programs.len() > 0 && auth_result.is_err() {
+                debug!("Checking tree authority owner for tree {:?}", pubkey);
+
+                let tree_authority_acc = client.get_account(&tree_authority).await?.value;
+                if let Some(tree_authority_acc) = tree_authority_acc {
+                    if !programs.contains(&tree_authority_acc.owner) {
+                        error!(
+                            "Owner of tree authority don't match: {}",
+                            tree_authority_acc.owner
+                        );
+                        auth_result?
+                    }
+                } else {
+                    error!("Tree authority account not found: {}", tree_authority);
                     auth_result?
                 }
             } else {
+                error!(
+                "Not_doing programs backfill and tree authority not match with known accounts: {}",
+                tree_authority
+            );
                 auth_result?
             }
-        } else {
-            auth_result?
         }
 
         let tree_header = header.try_into()?;
@@ -265,6 +277,7 @@ impl TreeResponse {
         client: &Rpc,
         authority_programs: &Vec<Pubkey>,
         ignore_bgum: bool,
+        ignore_auth_check: bool,
     ) -> Result<Vec<Self>, TreeErrorKind> {
         let trees = client
             .get_program_accounts(
@@ -287,6 +300,7 @@ impl TreeResponse {
                         account,
                         authority_programs,
                         ignore_bgum,
+                        ignore_auth_check,
                     )
                     .await
                     {
@@ -299,7 +313,10 @@ impl TreeResponse {
                 )
             }))
             .await
-            .map_err(|_| TreeErrorKind::SerializeTreeResponse)?
+            .map_err(|e| {
+                error!("all() TreeErrorKind::SerializeTreeResponse: {}", e);
+                TreeErrorKind::SerializeTreeResponse
+            })?
             .into_iter()
             .filter_map(|x| x)
             .collect::<Vec<_>>();
@@ -334,12 +351,15 @@ impl TreeResponse {
         let trees = futures::future::try_join_all(result.into_iter().flatten().filter_map(
             |(pubkey, account)| {
                 account.map(|account| {
-                    Self::try_from_rpc(client, *pubkey, account, authority_programs, false)
+                    Self::try_from_rpc(client, *pubkey, account, authority_programs, false, true)
                 })
             },
         ))
         .await
-        .map_err(|_| TreeErrorKind::SerializeTreeResponse)?;
+        .map_err(|e| {
+            error!("find() TreeErrorKind::SerializeTreeResponse: {}", e);
+            TreeErrorKind::SerializeTreeResponse
+        })?;
 
         Ok(trees)
     }

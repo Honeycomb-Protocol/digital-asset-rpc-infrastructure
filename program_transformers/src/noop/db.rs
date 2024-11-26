@@ -126,6 +126,7 @@ async fn handle_leaf<'c, T: ConnectionTrait + TransactionTrait>(
     seq: u64,
     slot: u64,
 ) -> ProgramTransformerResult<()> {
+    error!("Found leaf {} {}", bs58::encode(tree_id).into_string(), leaf_idx);
     let compressed_data_id = anchor_lang::solana_program::keccak::hashv(
         &[&tree_id[..], &leaf_idx.to_le_bytes()[..]][..],
     )
@@ -171,6 +172,7 @@ async fn handle_full_leaf<'c, T: ConnectionTrait + TransactionTrait>(
     seq: i64,
     slot: i64,
 ) -> ProgramTransformerResult<()> {
+    error!("Full Leaf");
     let tree = merkle_tree::Entity::find_by_id(tree_id.to_vec())
         .one(txn)
         .await
@@ -270,6 +272,7 @@ async fn handle_leaf_patch<'c, T: ConnectionTrait + TransactionTrait>(
     data: SchemaValue,
     slot: i64,
 ) -> ProgramTransformerResult<()> {
+    error!("Patch Leaf");
     let found = compressed_data::Entity::find()
         .filter(compressed_data::Column::Id.eq(id.to_owned()))
         .one(txn)
@@ -314,14 +317,24 @@ async fn handle_leaf_patch<'c, T: ConnectionTrait + TransactionTrait>(
                     {
                         if let Some(used_by) = object.get("used_by") {
                             debug!("used_by {:?}", used_by);
-                            log_character_history(
+                            match log_character_history(
                                 txn,
                                 id.to_owned(),
                                 used_by.to_owned().into(),
                                 data.to_owned(),
                                 slot as i64,
                             )
-                            .await?;
+                            .await
+                            {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    error!(
+                                        "Error while loggin character {} history: {}",
+                                        bs58::encode(id.clone()).into_string(),
+                                        e
+                                    )
+                                }
+                            };
                         }
                     }
                 }
@@ -347,6 +360,7 @@ async fn handle_empty_leaf<'c, T: ConnectionTrait + TransactionTrait>(
     txn: &T,
     id: Vec<u8>,
 ) -> ProgramTransformerResult<()> {
+    error!("Empty Leaf");
     let found = compressed_data::Entity::find()
         .filter(compressed_data::Column::Id.eq(id.clone()))
         .one(txn)
@@ -572,7 +586,7 @@ where
                     if let Some(JsonValue::Object(params)) = object.get("params") {
                         if let Some(JsonValue::String(id)) = params.get("mission_id") {
                             debug!("params = {:?} mission_id = {:?}", object, id);
-                            
+
                             // Remove the "pubkey:" prefix and convert the remaining part into a vector
                             let stripped_id = id.strip_prefix("pubkey:").ok_or_else(|| {
                                 ProgramTransformerError::ParsingError(

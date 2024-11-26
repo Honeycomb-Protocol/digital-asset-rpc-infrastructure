@@ -2,31 +2,41 @@ version: "3.9"
 services:
   builder:
     image: das-api/builder
-    container_name: builder
     build:
       context: .
       dockerfile: Builder.Dockerfile
   accounts-backfiller:
-    container_name: accounts-backfiller
     build:
       context: .
       dockerfile: Ops.Dockerfile
     depends_on:
       - builder
       - redis
-      - solana
     restart: always
     environment:
       RUST_LOG: debug
-      RUST_BACKTRACE: 1
     command:
       - /bin/sh
       - -c
       - |
-        /usr/src/app/das-ops account program HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm,7fkoi6JB8izj9mAousMhUkavcX9UjigZ7tr7yNRfkkEq,ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg,CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4,RSCR7UoY65mDMK8z2eCBvFmj4HSepGEY9ZjdCTiUDUA,B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h,MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6,HuntaX1CmUt5EByyFPE8pMf13SpvezybmMTtjmpmGmfj,Gui1D2TnmAqakeHfp4NNZCcpqawNVgmJxT9JBUqXgyoD --messenger-redis-url redis://redis:6379 --solana-rpc-url http://solana:8899
-        sleep 2s
+        /usr/src/app/das-ops account program HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm,ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg,CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4,RSCR7UoY65mDMK8z2eCBvFmj4HSepGEY9ZjdCTiUDUA,B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h,MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6,HuntaX1CmUt5EByyFPE8pMf13SpvezybmMTtjmpmGmfj,Gui1D2TnmAqakeHfp4NNZCcpqawNVgmJxT9JBUqXgyoD --messenger-redis-url redis://redis:6379 --solana-rpc-url https://mainnet.helius-rpc.com/?api-key=9d8318e3-a2ab-4e92-bafe-19b35a590d05 || echo "failed backfilling"
+        sleep 6h
+    logging:
+      driver: "json-file"
+      options:
+        max-size: 200k
+        max-file: 10
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '0.05'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '0.0001'
+    #       memory: 20M
   transactions-backfiller:
-    container_name: transactions-backfiller
     build:
       context: .
       dockerfile: Ops.Dockerfile
@@ -35,52 +45,47 @@ services:
       - db
       - migrator
       - redis
-      - solana
     restart: always
     volumes:
       - ./solana-test-validator-geyser-config/config-ingester-backfill.yml:/config.yml
     environment:
-      RUST_LOG: debug
+      RUST_LOG: error
       RUST_BACKTRACE: 1
-    deploy:
     command:
       - /bin/sh
       - -c
       - |
-        /usr/src/app/das-ops bubblegum backfill --programs HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm,7fkoi6JB8izj9mAousMhUkavcX9UjigZ7tr7yNRfkkEq,ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg,CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4,RSCR7UoY65mDMK8z2eCBvFmj4HSepGEY9ZjdCTiUDUA,B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h,MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6,HuntaX1CmUt5EByyFPE8pMf13SpvezybmMTtjmpmGmfj,Gui1D2TnmAqakeHfp4NNZCcpqawNVgmJxT9JBUqXgyoD --database-url postgres://solana:solana@db/solana --messenger-redis-url redis://redis:6379 --solana-rpc-url http://solana:8899
-        sleep 2s
+        /usr/src/app/das-ops bubblegum backfill --only-honeycomb --database-url postgres://solana:0062fb400fbfbaa556e9cc2b7bcaa600@db/solana --messenger-redis-url redis://redis:6379 --solana-rpc-url https://mainnet.helius-rpc.com/?api-key=9d8318e3-a2ab-4e92-bafe-19b35a590d05 --ignore-bgum || echo "failed backfilling"
+        sleep 6h
+    logging:
+      driver: "json-file"
+      options:
+        max-size: 200k
+        max-file: 10
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '0.05'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '0.0001'
+    #       memory: 20M
 
   migrator:
-    container_name: migrator
     depends_on:
       - db
       - builder
     environment:
-      DATABASE_URL: postgres://solana:solana@db/solana
+      DATABASE_URL: postgres://solana:0062fb400fbfbaa556e9cc2b7bcaa600@db/solana
     build:
       context: .
       dockerfile: Migrator.Dockerfile
     volumes:
       - ./init.sql:/init.sql
 
-  # load:
-  #   depends_on:
-  #     - migrator
-  #     - ingester
-  #     - builder
-  #     - solana
-  #   restart: always
-  #   environment:
-  #     KEYPAIR_SEED: "caputure the diems and stuff and then prolly take a nap and stuff"
-  #     NETWORK: "local"
-  #     AMOUNT_OF_CHAOS: 1
-  #     RPC_URL: "http://solana:8899/"
-  #   build:
-  #     context: .
-  #     dockerfile: Load.Dockerfile
-
   proxy:
-    container_name: proxy
     environment:
       RUST_LOG: error
     build:
@@ -89,101 +94,56 @@ services:
     volumes:
       - ./metaplex-rpc-proxy/envoy-compose.yaml:/etc/envoy.yaml
     ports:
-      - 9091:9091
+      - 9094:9091
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
   api:
-    container_name: api
     depends_on:
       - migrator
       - builder
     restart: always
     environment:
-      RUST_LOG: debug
-      APP_DATABASE_URL: postgres://solana:solana@db/solana
+      RUST_LOG: error
+      APP_DATABASE_URL: postgres://solana:0062fb400fbfbaa556e9cc2b7bcaa600@db/solana
       APP_SERVER_PORT: 9090
-      # APP_METRICS_PORT: 8125
-      # APP_METRICS_HOST: graphite
     build:
       context: .
       dockerfile: Api.Dockerfile
     ports:
-      - 9090:9090
-
+      - 9093:9090
   redis:
     image: "redis:7.0.0"
-    container_name: redis
-    ports:
-      - "6379:6379"
+    # ports:
+    #   - "6382:6379"
   redis-commander:
     image: rediscommander/redis-commander:latest
-    container_name: redis-commander
     restart: always
     environment:
       - REDIS_HOSTS=local:redis:6379
     ports:
-      - "9081:8081"
-
+      - "7682:8081"
   db:
-    container_name: db
     image: "postgres:14"
     restart: always
     command: [ "postgres", "-c", "log_statement=all", "-c", "log_destination=stderr", "-c", "max_connections=200" ]
     ports:
-      - 5439:5432
+      - 5441:5432
     environment:
       POSTGRES_USER: solana # The PostgreSQL user (useful to connect to the database)
-      POSTGRES_PASSWORD: solana # The PostgreSQL password (useful to connect to the database)
+      POSTGRES_PASSWORD: 0062fb400fbfbaa556e9cc2b7bcaa600 # The PostgreSQL password (useful to connect to the database)
       POSTGRES_DB: solana
     volumes:
-      - ./db-data/:/var/lib/postgresql/data/:rw
-
-  solana:
-    image: das-geyser-grpc
-    container_name: solana
-    volumes:
-      - ./programs:/so/:ro
-      - ./ledger:/config:rw
-      - ./solana-test-validator-geyser-config:/plugin-config:rw
-      - ./runs.sh:/runs.sh
-    environment:
-      RUST_LOG: error
-      PLUGIN_MESSENGER_CONFIG.messenger_type: "Redis"
-      PLUGIN_MESSENGER_CONFIG.connection_config: '{redis_connection_str="redis://redis"}'
-    ports:
-      - "9093:8899"
-      - "9094:8900"
-      - "9092:8900"
-      - "10000:10000"
-      # - "9092:8900"
-      # - "8899:8899"
-      # - "8900:8900"
-      # - "8901:8901"
-      # - "8902:8902"
-      # - "9900:9900"
-      # - "8000:8000"
-      # - "8001:8001"
-      # - "8002:8002"
-      # - "8003:8003"
-      # - "8004:8004"
-      # - "8005:8005"
-      # - "8006:8006"
-      # - "8007:8007"
-      # - "8008:8008"
-      # - "8009:8009"
-      # - "1024:1024"
-      # - "1027:1027"
+      - /mnt/storage/indexer-data/:/var/lib/postgresql/data/:rw
 
   ingester:
-    container_name: ingester
     depends_on:
       - migrator
       - builder
       - redis
       - db
-      - solana
     restart: always
     environment:
-      RUST_LOG: error
-      RUST_BACKTRAC: 1
+      RUST_LOG: debug
       CARGO_PKG_NAME: ingester
     build:
       context: .
@@ -191,23 +151,28 @@ services:
     volumes:
       - ./solana-test-validator-geyser-config/config-ingester.yml:/config.yml
     command: --config /config.yml ingester
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     logging:
       driver: "json-file"
       options:
         max-size: 200k
         max-file: 10
-    # ports:
-    #   - "8874:8874"
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '0.05'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '0.0001'
+    #       memory: 20M
   grpc2redis:
-    container_name: grpc2redis
     depends_on:
       - redis
-      - solana
       - builder
     restart: always
     environment:
       RUST_LOG: error
-      RUST_BACKTRACE: 1
       CARGO_PKG_NAME: grpc2redis
     build:
       context: .
@@ -220,10 +185,15 @@ services:
       options:
         max-size: 200k
         max-file: 10
-    # ports:
-    #   - "8873:8873"
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '0.05'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '0.0001'
+    #       memory: 20M
   download-metadata:
-    container_name: download-metadata
     depends_on:
       - migrator
       - builder
@@ -231,7 +201,6 @@ services:
     restart: always
     environment:
       RUST_LOG: error
-      RUST_BACKTRACE: 1
       CARGO_PKG_NAME: download-metadata
     build:
       context: .
@@ -239,6 +208,8 @@ services:
     volumes:
       - ./solana-test-validator-geyser-config/config-download-metadata.yml:/config.yml
     command: --config /config.yml download-metadata
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     logging:
       driver: "json-file"
       options:
@@ -248,9 +219,8 @@ services:
     #   - "8875:8875"
   prometheus:
     image: prom/prometheus
-    container_name: promtetheus
     ports:
-      - '9990:9090'
+      - '6990:9090'
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./prometheus/rules/rules.yml:/etc/prometheus/rules/rules.yml
@@ -262,9 +232,8 @@ services:
 
   grafana:
     image: docker.io/grafana/grafana:latest
-    container_name: grafana
     ports:
-      - '9991:3000'
+      - '6991:3000'
     volumes:
       - das_grafana_data:/var/lib/grafana
     restart: unless-stopped
@@ -273,7 +242,6 @@ services:
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:latest
-    container_name: cadvisor
     command:
       - '--housekeeping_interval=55s'
       - '--docker_only=true'
@@ -297,9 +265,8 @@ services:
 
   alertmanager:
     image: quay.io/prometheus/alertmanager:latest
-    container_name: alertmanager
     ports:
-      - '9992:9093'
+      - '6992:9093'
     volumes:
       - ./prometheus/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
       - alertmanager_data:/data
