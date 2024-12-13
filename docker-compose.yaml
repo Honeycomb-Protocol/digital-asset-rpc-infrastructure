@@ -227,7 +227,7 @@ services:
   prometheus:
     image: prom/prometheus
     ports:
-      - '6990:9090'
+      - ${PROMETHEUS_PORT}:9090
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./prometheus/rules/rules.yml:/etc/prometheus/rules/rules.yml
@@ -240,7 +240,7 @@ services:
   grafana:
     image: docker.io/grafana/grafana:latest
     ports:
-      - '6991:3000'
+      - ${GRAFANA_PORT}:3000
     volumes:
       - das_grafana_data:/var/lib/grafana
     restart: unless-stopped
@@ -273,7 +273,7 @@ services:
   alertmanager:
     image: quay.io/prometheus/alertmanager:latest
     ports:
-      - '6992:9093'
+      - ${ALERTMANAGER_PORT}:9093
     volumes:
       - ./prometheus/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
       - alertmanager_data:/data
