@@ -249,13 +249,12 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
                             &[(&config.transactions.stream_data_key, transaction.encode_to_vec())]
                         );
 
-
-                        pipe.xadd_maxlen(
-                            "TXN_CACHE",
-                            StreamMaxlen::Approx(config.transactions.stream_maxlen),
-                            "*",
-                            &[(&config.transactions.stream_data_key, transaction.encode_to_vec())]
-                        );
+                        // pipe.xadd_maxlen(
+                        //     &String::from("TXN_CACHE"),
+                        //     StreamMaxlen::Approx(config.transactions.stream_maxlen),
+                        //     "*",
+                        //     &[(&config.transactions.stream_data_key, [vec![endpoint_index], transaction.encode_to_vec()].concat())]
+                        // );
 
                         pipe_transactions += 1;
                     }

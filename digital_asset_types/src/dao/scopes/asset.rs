@@ -78,7 +78,7 @@ pub async fn get_by_creator(
         limit,
         show_unverified_collections,
         Some(creator),
-        None
+        None,
     )
     .await
 }
@@ -139,7 +139,7 @@ pub async fn get_by_grouping(
         limit,
         show_unverified_collections,
         None,
-        None
+        None,
     )
     .await
 }
@@ -165,7 +165,7 @@ pub async fn get_assets_by_owner(
         pagination,
         limit,
         show_unverified_collections,
-        Some(owner)
+        Some(owner),
     )
     .await
 }
@@ -189,7 +189,7 @@ pub async fn get_assets(
         pagination,
         limit,
         false,
-        None
+        None,
     )
     .await
 }
@@ -216,7 +216,7 @@ pub async fn get_by_authority(
         limit,
         show_unverified_collections,
         None,
-        None
+        None,
     )
     .await
 }
@@ -250,7 +250,14 @@ where
     let assets = paginate(pagination, limit, stmt, sort_direction, asset::Column::Id)
         .all(conn)
         .await?;
-    get_related_for_assets(conn, assets, show_unverified_collections, required_creator, include_owner).await
+    get_related_for_assets(
+        conn,
+        assets,
+        show_unverified_collections,
+        required_creator,
+        include_owner,
+    )
+    .await
 }
 
 pub async fn get_related_for_assets(
@@ -404,7 +411,6 @@ pub async fn get_assets_by_condition(
     limit: u64,
     show_unverified_collections: bool,
     include_owner: Option<Vec<u8>>,
-
 ) -> Result<Vec<FullAsset>, DbErr> {
     let mut stmt = asset::Entity::find();
     for def in joins {
@@ -420,8 +426,14 @@ pub async fn get_assets_by_condition(
     let assets = paginate(pagination, limit, stmt, sort_direction, asset::Column::Id)
         .all(conn)
         .await?;
-    let full_assets =
-        get_related_for_assets(conn, assets, show_unverified_collections, None, include_owner).await?;
+    let full_assets = get_related_for_assets(
+        conn,
+        assets,
+        show_unverified_collections,
+        None,
+        include_owner,
+    )
+    .await?;
     Ok(full_assets)
 }
 
@@ -441,7 +453,7 @@ pub async fn get_by_id(
             _ => Err(DbErr::RecordNotFound("Asset Not Found".to_string())),
         })?;
 
-    let mut token = tokens::Entity::find()
+    let token = tokens::Entity::find()
         .filter(tokens::Column::Mint.eq(asset_id.clone()))
         .one(conn)
         .await?;

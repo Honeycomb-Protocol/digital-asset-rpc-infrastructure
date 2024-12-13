@@ -5,10 +5,10 @@ docker compose down -v --remove-orphans
 sudo rm -r db-data > /dev/null && echo "db-data Flushed" || echo "db-data is empty"
 sudo rm -r ledger > /dev/null && echo "ledger Flushed" || echo "ledger is empty"
 
-docker compose up db redis -d
+docker compose up solana db redis -d
 sleep 5s
 
-docker compose up solana migrator -d
+docker compose up migrator -d
 sleep 10s
 
 docker compose up -d

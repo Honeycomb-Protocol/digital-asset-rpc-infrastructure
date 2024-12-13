@@ -5,13 +5,14 @@ use {
     },
     sqlx::{
         postgres::{PgConnectOptions, PgPoolOptions},
-        PgPool,
+        ConnectOptions, PgPool,
     },
     tokio::time::{sleep, Duration},
 };
 
 pub async fn create_pool(config: ConfigIngesterPostgres) -> anyhow::Result<PgPool> {
-    let options: PgConnectOptions = config.url.parse()?;
+    let mut options: PgConnectOptions = config.url.parse()?;
+    options.disable_statement_logging();
     PgPoolOptions::new()
         .min_connections(config.min_connections.try_into()?)
         .max_connections(config.max_connections.try_into()?)
