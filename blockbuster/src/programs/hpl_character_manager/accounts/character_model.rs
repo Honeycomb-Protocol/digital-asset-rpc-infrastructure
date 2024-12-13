@@ -9,6 +9,8 @@ pub struct CharacterModel {
     pub config: CharacterConfig,
     pub attributes: Schema,
     pub merkle_trees: ControlledMerkleTrees,
+    pub equip_able_criteria: ShortVec<ShortString>,
+    pub cooldown: CharacterCooldown,
 }
 impl CharacterModel {
     pub const DISCRIMINATOR: [u8; 8] = [48, 232, 95, 182, 18, 16, 71, 113];
@@ -49,4 +51,8 @@ pub enum MintAs {
     MplMetadata,
     MplBubblegum { merkle_tree: Pubkey },
     TokenExtensions,
+}
+#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
+pub struct CharacterCooldown {
+    pub ejection: i64,
 }

@@ -579,7 +579,7 @@ where
     T: ConnectionTrait + TransactionTrait,
 {
     match new_used_by_value {
-        SchemaValue::Enum(kind, params) => {
+        SchemaValue::Enum(kind, _params) => {
             debug!("kind = {:?}", kind);
             let mut all_rewards: Vec<JsonValue> = Vec::new();
             let mut mission_id: Option<String> = None;

@@ -17,6 +17,9 @@ pub struct Resource {
 
     // the characteristics of this resource
     pub kind: ResourceKind,
+
+    // the tags of the resource
+    pub tags: ShortVec<ShortString>,
 }
 impl Resource {
     pub const DISCRIMINATOR: [u8; 8] = [10, 160, 2, 1, 42, 207, 51, 212];
@@ -40,7 +43,7 @@ pub enum ResourceKind {
     },
 
     HplNonFungible {
-        characteristics: Vec<String>,
+        characteristics: ShortVec<ShortString>,
     },
 
     WrappedFungible {
@@ -49,7 +52,7 @@ pub enum ResourceKind {
     },
 
     WrappedMplCore {
-        characteristics: Vec<String>,
+        characteristics: ShortVec<ShortString>,
     },
 }
 
