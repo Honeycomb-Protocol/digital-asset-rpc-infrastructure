@@ -51,8 +51,12 @@ where
 {
     debug!("Inserting AppData");
     let buf = &mut &application_data.application_data[..];
-    let event = CompressedDataEvent::deserialize(buf)
-        .map_err(|db_err| ProgramTransformerError::CompressedDataParseError(db_err.to_string()))?;
+    let event = CompressedDataEvent::deserialize(buf).map_err(|db_err| {
+        ProgramTransformerError::CompressedDataParseError(format!(
+            "CompressedDataEvent::deserialize failed: {}",
+            db_err.to_string()
+        ))
+    })?;
     debug!("Application data parsed successfully");
     match event {
         CompressedDataEvent::TreeSchemaValue {
@@ -185,7 +189,10 @@ async fn handle_full_leaf<'c, T: ConnectionTrait + TransactionTrait>(
     if let Some(tree) = tree {
         debug!("Parsing tree data schema");
         let schema = Schema::deserialize(&mut &tree.data_schema[..]).map_err(|db_err| {
-            ProgramTransformerError::CompressedDataParseError(db_err.to_string())
+            ProgramTransformerError::CompressedDataParseError(format!(
+                "Schema::deserialize failed: {}",
+                db_err.to_string()
+            ))
         })?;
 
         if tree.program.is_none() {

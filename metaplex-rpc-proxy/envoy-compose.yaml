@@ -29,9 +29,6 @@ static_resources:
                     root_id: "proxy"
                     vm_config:
                       runtime: "envoy.wasm.runtime.v8"
-                      configuration:
-                        "@type": type.googleapis.com/google.protobuf.StringValue
-                        value: "TOKEN"
                       code:
                         local:
                           filename: "/etc/rpc_proxy.wasm"

@@ -34,6 +34,7 @@ struct RpcProxy {
 
 impl RpcProxy {
     fn new(path: Option<String>) -> Self {
+        info!("Read API: path: {:?}", path);
         Self {
             rpc_url_path: path.unwrap_or("/".to_string()),
         }
@@ -110,6 +111,8 @@ impl HttpContext for RpcProxy {
                     return Action::Continue;
                 } else {
                     let res = upstream_rpc_call(self, body);
+                    info!("Read API res: {:?}", res);
+
                     return match res {
                         Ok(_) => Action::Pause,
                         Err(e) => {

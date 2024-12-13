@@ -24,7 +24,7 @@ cat << EOL > /plugin-config/grpc-plugin-config.json
             "level": "info"
         },
         "grpc": {
-            "address": "0.0.0.0:10001",
+            "address": "0.0.0.0:10000",
             "max_decoding_message_size": "4_194_304",
             "snapshot_plugin_channel_capacity": null,
             "snapshot_client_channel_capacity": "50_000_000",
@@ -69,7 +69,7 @@ cat << EOL > /plugin-config/grpc-plugin-config.json
             }
         },
         "prometheus": {
-            "address": "0.0.0.0:8999"
+            "address": "0.0.0.0:10001"
         },
         "block_fail_action": "log"
     }
@@ -122,4 +122,4 @@ args=(
 
 
 apt update && apt install ca-certificates -y && update-ca-certificates
-solana-test-validator  "${programs[@]}" "${args[@]}" $SOLANA_RUN_SH_VALIDATOR_ARGS >> /dev/null
+solana-test-validator  "${programs[@]}" "${args[@]}" $SOLANA_RUN_SH_VALIDATOR_ARGS # >> /dev/null

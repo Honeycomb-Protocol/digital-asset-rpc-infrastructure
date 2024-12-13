@@ -1,7 +1,7 @@
 groups:
   - name: alert_rules
     rules:
-      - alert: InstanceDown
+      - alert: HoneynetInstanceDown
         expr: up == 0
         for: 5m
         labels:
@@ -12,7 +12,7 @@ groups:
 
   - name: das_general_services
     rules:
-      - alert: DASContainerDown
+      - alert: HoneynetDASContainerDown
         expr: absent(container_last_seen{name="db"})
         for: 5m
         labels:
@@ -21,7 +21,7 @@ groups:
           summary: "db Container is down"
           description: "The Docker container db has been down for more than 5 minute."
 
-      - alert: DASContainerDown
+      - alert: HoneynetDASContainerDown
         expr: absent(container_last_seen{name="redis"})
         for: 5m
         labels:
@@ -30,7 +30,7 @@ groups:
           summary: "redis Container is down"
           description: "The Docker container redis has been down for more than 5 minute."
 
-      - alert: DASContainerDown
+      - alert: HoneynetDASContainerDown
         expr: absent(container_last_seen{name="redis-commander"})
         for: 5m
         labels:
@@ -39,7 +39,7 @@ groups:
           summary: "redis-commander Container is down"
           description: "The Docker container redis-commander has been down for more than 5 minute."
 
-      - alert: DASContainerDown
+      - alert: HoneynetDASContainerDown
         expr: absent(container_last_seen{name="proxy"})
         for: 5m
         labels:
@@ -48,7 +48,7 @@ groups:
           summary: "proxy Container is down"
           description: "The Docker container proxy has been down for more than 5 minute."
 
-      - alert: DASContainerDown
+      - alert: HoneynetDASContainerDown
         expr: absent(container_last_seen{name="api"})
         for: 5m
         labels:
@@ -57,7 +57,7 @@ groups:
           summary: "api Container is down"
           description: "The Docker container api has been down for more than 5 minute."
 
-      - alert: DASContainerDown
+      - alert: HoneynetDASContainerDown
         expr: absent(container_last_seen{name="solana"})
         for: 5m
         labels:

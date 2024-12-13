@@ -2,6 +2,8 @@ FROM rust:1.75-bullseye AS builder
 RUN apt-get update -y && \
   apt-get install -y build-essential make git
 
+ENV GIT_VERSION 2.43.0
+
 RUN mkdir /rust
 RUN mkdir /rust/bins
 COPY Cargo.toml /rust

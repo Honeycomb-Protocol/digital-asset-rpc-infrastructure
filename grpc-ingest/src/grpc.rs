@@ -1,15 +1,26 @@
 use {
     crate::{
         config::ConfigGrpc, prom::redis_xadd_status_inc, redis::metrics_xlen, util::create_shutdown,
-    }, futures::{channel::mpsc, stream::StreamExt, SinkExt}, log::{debug, error, info}, lru::LruCache, redis::{streams::StreamMaxlen, RedisResult, Value as RedisValue}, solana_sdk::bs58, std::{collections::HashMap, num::NonZeroUsize, sync::Arc, time::Duration}, tokio::{
+    },
+    futures::{channel::mpsc, stream::StreamExt, SinkExt},
+    log::{debug, error, info},
+    lru::LruCache,
+    redis::{streams::StreamMaxlen, RedisResult, Value as RedisValue},
+    solana_sdk::bs58,
+    std::{collections::HashMap, num::NonZeroUsize, sync::Arc, time::Duration},
+    tokio::{
         spawn,
         task::JoinSet,
         time::{sleep, Instant},
-    }, tracing::warn, yellowstone_grpc_client::GeyserGrpcClient, yellowstone_grpc_proto::{
+    },
+    tracing::warn,
+    yellowstone_grpc_client::GeyserGrpcClient,
+    yellowstone_grpc_proto::{
         geyser::{SubscribeRequest, SubscribeUpdateTransaction},
         prelude::subscribe_update::UpdateOneof,
         prost::Message,
-    }, yellowstone_grpc_tools::config::GrpcRequestToProto
+    },
+    yellowstone_grpc_tools::config::GrpcRequestToProto,
 };
 
 pub struct GrpcStream {
@@ -249,13 +260,12 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
                             &[(&config.transactions.stream_data_key, transaction.encode_to_vec())]
                         );
 
-
-                        pipe.xadd_maxlen(
-                            "TXN_CACHE",
-                            StreamMaxlen::Approx(config.transactions.stream_maxlen),
-                            "*",
-                            &[(&config.transactions.stream_data_key, transaction.encode_to_vec())]
-                        );
+                        // pipe.xadd_maxlen(
+                        //     &String::from("TXN_CACHE"),
+                        //     StreamMaxlen::Approx(config.transactions.stream_maxlen),
+                        //     "*",
+                        //     &[(&config.transactions.stream_data_key, [vec![endpoint_index], transaction.encode_to_vec()].concat())]
+                        // );
 
                         pipe_transactions += 1;
                     }

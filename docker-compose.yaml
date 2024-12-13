@@ -5,7 +5,9 @@ services:
     build:
       context: .
       dockerfile: Builder.Dockerfile
-    
+    environment:
+      GIT_VERSION: 2.43.0
+
 
   accounts-backfiller:
     build:
@@ -17,6 +19,7 @@ services:
     restart: always
     environment:
       RUST_LOG: error
+      RUST_BACKTRACE: 1
     command:
       - /bin/sh
       - -c
@@ -133,16 +136,24 @@ services:
     container_name: solana
     volumes:
       - ./programs:/so/:ro
-      - ./ledger:/config:rw
+      - /mnt/storage/localnet/ledger:/config:rw
       - ./solana-test-validator-geyser-config:/plugin-config:rw
       - ./runs.sh:/runs.sh
     environment:
       RUST_LOG: error
       PLUGIN_MESSENGER_CONFIG.messenger_type: "Redis"
       PLUGIN_MESSENGER_CONFIG.connection_config: '{redis_connection_str="redis://redis"}'
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '0.5'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '0.0001'
+    #       memory: 20M
     ports:
-      - "9093:8899"
-      - "9094:8900"
+      - "9098:8899"
+      - "9099:8900"
       - "9092:8900"
 
   ingester:
@@ -168,7 +179,7 @@ services:
       options:
         max-size: 200k
         max-file: 10
-
+        
   grpc2redis:
     depends_on:
       - redis
@@ -211,9 +222,7 @@ services:
       options:
         max-size: 200k
         max-file: 10
-    # ports:
-    #   - "8875:8875"
-  
+
 
   prometheus:
     image: prom/prometheus
@@ -243,7 +252,7 @@ services:
     command:
       - '--housekeeping_interval=55s'
       - '--docker_only=true'
-      - '--disable_metrics=disk,network,tcp,udp,percpu,sched,process'
+      # - '--disable_metrics=disk,network,tcp,udp,percpu,sched,process'
     # ports:
     #   - '8083:8080'
     volumes:

@@ -6,10 +6,10 @@ fn main() -> anyhow::Result<()> {
     envs.emit()?;
 
     // vergen git version does not looks cool
-    println!(
-        "cargo:rustc-env=GIT_VERSION={}",
-        git_version::git_version!()
-    );
+    // println!(
+    //     "cargo:rustc-env=GIT_VERSION={}",
+    //     git_version::git_version!()
+    // );
 
     // Extract packages version
     let lockfile = Lockfile::load("../Cargo.lock")?;
