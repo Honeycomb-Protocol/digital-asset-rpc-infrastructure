@@ -167,6 +167,7 @@ pub fn create_asset(
             mpl_core_collection_current_size: None,
             mpl_core_collection_num_minted: None,
             mpl_core_plugins_json_version: None,
+            mint_extensions: None
         },
     )
 }

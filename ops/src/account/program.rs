@@ -48,12 +48,16 @@ pub async fn run(config: Args) -> Result<()> {
         let accounts_chunks = accounts.chunks(config.batch_size);
 
         for batch in accounts_chunks {
-            let results = futures::future::try_join_all(
-                batch
-                    .iter()
-                    .map(|(pubkey, _account)| AccountDetails::fetch(&rpc, pubkey)),
-            )
-            .await?;
+            // let results = futures::future::try_join_all(
+            //     batch
+            //         .iter()
+            //         .map(|(pubkey, _account)| AccountDetails::fetch(&rpc, pubkey)),
+            // )
+            // .await?;
+
+            let results = batch
+            .into_iter()
+            .map(|(pubkey, account)| AccountDetails::new(account.to_owned(), 0, pubkey));
 
             for account_detail in results {
                 let AccountDetails {

@@ -19,7 +19,7 @@ services:
       - /bin/sh
       - -c
       - |
-        /usr/src/app/das-ops account program HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm,ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg,CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4,RSCR7UoY65mDMK8z2eCBvFmj4HSepGEY9ZjdCTiUDUA,B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h,MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6,HuntaX1CmUt5EByyFPE8pMf13SpvezybmMTtjmpmGmfj,Gui1D2TnmAqakeHfp4NNZCcpqawNVgmJxT9JBUqXgyoD --messenger-redis-url redis://redis:6379 --solana-rpc-url https://mainnet.helius-rpc.com/?api-key=9d8318e3-a2ab-4e92-bafe-19b35a590d05 || echo "failed backfilling"
+        /usr/src/app/das-ops account program HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm --messenger-redis-url redis://redis:6379 --solana-rpc-url https://mainnet.helius-rpc.com/?api-key=9d8318e3-a2ab-4e92-bafe-19b35a590d05 || echo "failed backfilling"
         sleep 6h
     logging:
       driver: "json-file"
@@ -55,7 +55,7 @@ services:
       - /bin/sh
       - -c
       - |
-        /usr/src/app/das-ops bubblegum backfill --only-honeycomb --database-url postgres://solana:0062fb400fbfbaa556e9cc2b7bcaa600@db/solana --messenger-redis-url redis://redis:6379 --solana-rpc-url https://mainnet.helius-rpc.com/?api-key=9d8318e3-a2ab-4e92-bafe-19b35a590d05 --ignore-bgum || echo "failed backfilling"
+        /usr/src/app/das-ops bubblegum backfill --only-trees 3VZrrv8UHDEdVMRyMn22bCEN1VxFCVRbVKJnj3CpPrxx,DdZ5EDYqbnMUhNv2bA1vR9EU5zKtz8QPzBoZHBo1haGs --database-url postgres://solana:0062fb400fbfbaa556e9cc2b7bcaa600@db/solana --messenger-redis-url redis://redis:6379 --solana-rpc-url https://mainnet.helius-rpc.com/?api-key=9d8318e3-a2ab-4e92-bafe-19b35a590d05 --ignore-bgum || echo "failed backfilling"
         sleep 6h
     logging:
       driver: "json-file"

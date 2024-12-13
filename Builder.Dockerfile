@@ -18,6 +18,8 @@ COPY program_transformers /rust/program_transformers
 COPY tools /rust/tools
 COPY blockbuster rust/blockbuster
 WORKDIR /rust
+RUN git config --system --add safe.directory '*'
+ENV GIT_VERSION=111
 RUN --mount=type=cache,target=/rust/target,id=das-rust \
   cargo build --release --bins && cp `find /rust/target/release -maxdepth 1 -type f | sed 's/^\.\///' | grep -v "\." ` /rust/bins
 
