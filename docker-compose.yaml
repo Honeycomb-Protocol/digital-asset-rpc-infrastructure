@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: Builder.Dockerfile
+    
+
   accounts-backfiller:
     build:
       context: .
@@ -14,12 +16,12 @@ services:
       - redis
     restart: always
     environment:
-      RUST_LOG: debug
+      RUST_LOG: error
     command:
       - /bin/sh
       - -c
       - |
-        /usr/src/app/das-ops account program HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm --messenger-redis-url redis://redis:6379 --solana-rpc-url https://mainnet.helius-rpc.com/?api-key=9d8318e3-a2ab-4e92-bafe-19b35a590d05 || echo "failed backfilling"
+        /usr/src/app/das-ops account program HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm,ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg,CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4,RSCR7UoY65mDMK8z2eCBvFmj4HSepGEY9ZjdCTiUDUA,B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h,MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6,HuntaX1CmUt5EByyFPE8pMf13SpvezybmMTtjmpmGmfj,Gui1D2TnmAqakeHfp4NNZCcpqawNVgmJxT9JBUqXgyoD --messenger-redis-url redis://redis:6379 --solana-rpc-url ${SOLANA_RPC} || echo "failed backfilling"
         sleep 6h
     logging:
       driver: "json-file"
@@ -28,14 +30,7 @@ services:
         max-file: 10
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: '0.05'
-    #       memory: 2G
-    #     reservations:
-    #       cpus: '0.0001'
-    #       memory: 20M
+  
   transactions-backfiller:
     build:
       context: .
@@ -55,7 +50,7 @@ services:
       - /bin/sh
       - -c
       - |
-        /usr/src/app/das-ops bubblegum backfill --only-trees 3VZrrv8UHDEdVMRyMn22bCEN1VxFCVRbVKJnj3CpPrxx,DdZ5EDYqbnMUhNv2bA1vR9EU5zKtz8QPzBoZHBo1haGs --database-url postgres://solana:0062fb400fbfbaa556e9cc2b7bcaa600@db/solana --messenger-redis-url redis://redis:6379 --solana-rpc-url https://mainnet.helius-rpc.com/?api-key=9d8318e3-a2ab-4e92-bafe-19b35a590d05 --ignore-bgum || echo "failed backfilling"
+        /usr/src/app/das-ops bubblegum backfill --only-honeycomb --database-url postgres://solana:0062fb400fbfbaa556e9cc2b7bcaa600@db/solana --messenger-redis-url redis://redis:6379 --solana-rpc-url ${SOLANA_RPC} --ignore-bgum || echo "failed backfilling"
         sleep 6h
     logging:
       driver: "json-file"
@@ -64,39 +59,8 @@ services:
         max-file: 10
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: '0.05'
-    #       memory: 2G
-    #     reservations:
-    #       cpus: '0.0001'
-    #       memory: 20M
 
-  migrator:
-    depends_on:
-      - db
-      - builder
-    environment:
-      DATABASE_URL: postgres://solana:0062fb400fbfbaa556e9cc2b7bcaa600@db/solana
-    build:
-      context: .
-      dockerfile: Migrator.Dockerfile
-    volumes:
-      - ./init.sql:/init.sql
 
-  proxy:
-    environment:
-      RUST_LOG: error
-    build:
-      context: .
-      dockerfile: Proxy.Dockerfile
-    volumes:
-      - ./metaplex-rpc-proxy/envoy-compose.yaml:/etc/envoy.yaml
-    ports:
-      - 9094:9091
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
   api:
     depends_on:
       - migrator
@@ -110,30 +74,76 @@ services:
       context: .
       dockerfile: Api.Dockerfile
     ports:
-      - 9093:9090
+      - ${API_PORT}:9090
+
+  proxy:
+    environment:
+      RUST_LOG: error
+    build:
+      context: .
+      dockerfile: Proxy.Dockerfile
+    volumes:
+      - ./metaplex-rpc-proxy/envoy-compose.yaml:/etc/envoy.yaml
+    ports:
+      - ${PROXY_PORT}:9091
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  
   redis:
     image: "redis:7.0.0"
-    # ports:
-    #   - "6382:6379"
+  
   redis-commander:
     image: rediscommander/redis-commander:latest
     restart: always
     environment:
       - REDIS_HOSTS=local:redis:6379
     ports:
-      - "7682:8081"
+      - ${REDIS_COMMANDER_PORT}:8081
+  
+
+  migrator:
+    depends_on:
+      - db
+      - builder
+    environment:
+      DATABASE_URL: postgres://solana:0062fb400fbfbaa556e9cc2b7bcaa600@db/solana
+    build:
+      context: .
+      dockerfile: Migrator.Dockerfile
+    volumes:
+      - ./init.sql:/init.sql
+
   db:
     image: "postgres:14"
     restart: always
     command: [ "postgres", "-c", "log_statement=all", "-c", "log_destination=stderr", "-c", "max_connections=200" ]
     ports:
-      - 5441:5432
+      - ${DB_PORT}:5432
     environment:
       POSTGRES_USER: solana # The PostgreSQL user (useful to connect to the database)
-      POSTGRES_PASSWORD: 0062fb400fbfbaa556e9cc2b7bcaa600 # The PostgreSQL password (useful to connect to the database)
+      POSTGRES_PASSWORD: ${DB_PASSWORD} # The PostgreSQL password (useful to connect to the database)
       POSTGRES_DB: solana
     volumes:
-      - /mnt/storage/indexer-data/:/var/lib/postgresql/data/:rw
+      - ${DB_VOLUME}:/var/lib/postgresql/data/:rw
+
+
+  solana:
+    image: das-geyser-grpc
+    container_name: solana
+    volumes:
+      - ./programs:/so/:ro
+      - ./ledger:/config:rw
+      - ./solana-test-validator-geyser-config:/plugin-config:rw
+      - ./runs.sh:/runs.sh
+    environment:
+      RUST_LOG: error
+      PLUGIN_MESSENGER_CONFIG.messenger_type: "Redis"
+      PLUGIN_MESSENGER_CONFIG.connection_config: '{redis_connection_str="redis://redis"}'
+    ports:
+      - "9093:8899"
+      - "9094:8900"
+      - "9092:8900"
 
   ingester:
     depends_on:
@@ -158,14 +168,7 @@ services:
       options:
         max-size: 200k
         max-file: 10
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: '0.05'
-    #       memory: 2G
-    #     reservations:
-    #       cpus: '0.0001'
-    #       memory: 20M
+
   grpc2redis:
     depends_on:
       - redis
@@ -185,14 +188,7 @@ services:
       options:
         max-size: 200k
         max-file: 10
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: '0.05'
-    #       memory: 2G
-    #     reservations:
-    #       cpus: '0.0001'
-    #       memory: 20M
+
   download-metadata:
     depends_on:
       - migrator
@@ -217,6 +213,8 @@ services:
         max-file: 10
     # ports:
     #   - "8875:8875"
+  
+
   prometheus:
     image: prom/prometheus
     ports:
