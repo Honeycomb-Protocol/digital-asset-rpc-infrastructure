@@ -180,8 +180,12 @@ impl ProgramTransformer {
     pub async fn handle_transaction(
         &self,
         tx_info: &TransactionInfo,
+        tree: Option<Pubkey>,
     ) -> ProgramTransformerResult<()> {
-        error!("Handling Transaction: {:?} {:?}", tx_info.signature, tx_info.slot);
+        error!(
+            "Handling Transaction: {:?} {:?}",
+            tx_info.signature, tx_info.slot
+        );
         let instructions = self.break_transaction(tx_info);
         let mut not_impl = 0;
         let ixlen = instructions.len();
@@ -264,6 +268,7 @@ impl ProgramTransformer {
                             &ix,
                             &self.storage,
                             self.cl_audits,
+                            tree,
                         )
                         .await
                         {

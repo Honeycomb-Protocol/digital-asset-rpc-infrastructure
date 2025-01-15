@@ -25,6 +25,7 @@ services:
       - -c
       - |
         /usr/src/app/das-ops account program HivezrprVqHR6APKKQkkLHmUG8waZorXexEBRZWh5LRm,ChRCtrG7X5kb9YncA4wuyD68DXXL8Szt3zBCCGiioBTg,CrncyaGmZfWvpxRcpHEkSrqeeyQsdn4MAedo9KuARAc4,RSCR7UoY65mDMK8z2eCBvFmj4HSepGEY9ZjdCTiUDUA,B4DxK2DhseG2ieSqckSoSvfUbYRz6hbNfXeWwmF7dm4h,MiNESdRXUSmWY7NkAKdW9nMkjJZCaucguY3MDvkSmr6,HuntaX1CmUt5EByyFPE8pMf13SpvezybmMTtjmpmGmfj,Gui1D2TnmAqakeHfp4NNZCcpqawNVgmJxT9JBUqXgyoD --messenger-redis-url redis://redis:6379 --solana-rpc-url ${SOLANA_RPC} || echo "failed backfilling"
+        echo "Done"
         sleep 6h
     logging:
       driver: "json-file"
@@ -53,7 +54,8 @@ services:
       - /bin/sh
       - -c
       - |
-        /usr/src/app/das-ops bubblegum backfill --only-honeycomb --database-url postgres://solana:0062fb400fbfbaa556e9cc2b7bcaa600@db/solana --messenger-redis-url redis://redis:6379 --solana-rpc-url ${SOLANA_RPC} --ignore-bgum || echo "failed backfilling"
+        /usr/src/app/das-ops bubblegum backfill --only-honeycomb --database-url postgres://solana:${DB_PASSWORD}@db/solana --messenger-redis-url redis://redis:6379 --solana-rpc-url ${SOLANA_RPC} --ignore-bgum || echo "failed backfilling"
+        echo "Done"
         sleep 6h
     logging:
       driver: "json-file"
@@ -71,7 +73,7 @@ services:
     restart: always
     environment:
       RUST_LOG: error
-      APP_DATABASE_URL: postgres://solana:0062fb400fbfbaa556e9cc2b7bcaa600@db/solana
+      APP_DATABASE_URL: postgres://solana:${DB_PASSWORD}@db/solana
       APP_SERVER_PORT: 9090
     build:
       context: .
@@ -110,7 +112,7 @@ services:
       - db
       - builder
     environment:
-      DATABASE_URL: postgres://solana:0062fb400fbfbaa556e9cc2b7bcaa600@db/solana
+      DATABASE_URL: postgres://solana:${DB_PASSWORD}@db/solana
     build:
       context: .
       dockerfile: Migrator.Dockerfile
@@ -130,31 +132,6 @@ services:
     volumes:
       - ${DB_VOLUME}:/var/lib/postgresql/data/:rw
 
-
-  solana:
-    image: das-geyser-grpc
-    container_name: solana
-    volumes:
-      - ./programs:/so/:ro
-      - /mnt/storage/localnet/ledger:/config:rw
-      - ./solana-test-validator-geyser-config:/plugin-config:rw
-      - ./runs.sh:/runs.sh
-    environment:
-      RUST_LOG: error
-      PLUGIN_MESSENGER_CONFIG.messenger_type: "Redis"
-      PLUGIN_MESSENGER_CONFIG.connection_config: '{redis_connection_str="redis://redis"}'
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: '0.5'
-    #       memory: 2G
-    #     reservations:
-    #       cpus: '0.0001'
-    #       memory: 20M
-    ports:
-      - "9098:8899"
-      - "9099:8900"
-      - "9092:8900"
 
   ingester:
     depends_on:

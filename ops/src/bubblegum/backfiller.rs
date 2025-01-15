@@ -218,47 +218,48 @@ fn spawn_tree_worker(
         // Specific Transaction worker for this tree
         let transaction_solana_rpc = client.clone();
         let (sig_sender, mut sig_receiver) = mpsc::channel::<Signature>(signature_channel_size);
-        let transaction_worker_manager: JoinHandle<Vec<TransactionInfo>> = tokio::spawn(async move {
-            let mut handlers = FuturesOrdered::new();
-            let mut handled = vec![];
-            while let Some(signature) = sig_receiver.recv().await {
-                if handlers.len() >= transaction_worker_count {
-                    match handlers.next().await {
-                        Some(Ok(Some(d)))  => {
+        let transaction_worker_manager: JoinHandle<Vec<TransactionInfo>> =
+            tokio::spawn(async move {
+                let mut handlers = FuturesOrdered::new();
+                let mut handled = vec![];
+                while let Some(signature) = sig_receiver.recv().await {
+                    if handlers.len() >= transaction_worker_count {
+                        match handlers.next().await {
+                            Some(Ok(Some(d))) => {
+                                statsd_count!("transaction.succeeded", 1);
+                                handled.push(d)
+                            }
+                            Some(Err(e)) => {
+                                error!("queue transaction: {:?}", e);
+                                statsd_count!("transaction.failed", 1);
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    let solana_rpc = transaction_solana_rpc.clone();
+
+                    let handle = spawn_transaction_worker(solana_rpc, signature);
+
+                    handlers.push_back(handle);
+                }
+                while let Some(handler) = handlers.next().await {
+                    match handler {
+                        Ok(Some(d)) => {
                             statsd_count!("transaction.succeeded", 1);
                             handled.push(d)
-                        },
-                        Some(Err(e)) => {
+                        }
+                        Err(e) => {
                             error!("queue transaction: {:?}", e);
                             statsd_count!("transaction.failed", 1);
                             break;
-                        },
-                        _ => {}
-                    } 
+                        }
+                        Ok(None) => continue,
+                    }
                 }
-
-                let solana_rpc = transaction_solana_rpc.clone();
-
-                let handle = spawn_transaction_worker(solana_rpc, signature);
-
-                handlers.push_back(handle);
-            }
-            while let Some(handler) = handlers.next().await {
-                match handler {
-                    Ok(Some(d))  => {
-                        statsd_count!("transaction.succeeded", 1);
-                        handled.push(d)
-                    },
-                    Err(e) => {
-                        error!("queue transaction: {:?}", e);
-                        statsd_count!("transaction.failed", 1);
-                        break;
-                    },
-                    Ok(None) => continue
-                } 
-            }
-            handled
-        });
+                handled
+            });
 
         let gap_worker_manager = tokio::spawn(async move {
             let client = client.clone();
@@ -336,7 +337,10 @@ fn spawn_tree_worker(
         let mut transactions = transaction_worker_manager.await?;
         transactions.reverse();
         for transaction in transactions {
-            match program_transformer.handle_transaction(&transaction).await {
+            match program_transformer
+                .handle_transaction(&transaction, Some(tree.pubkey))
+                .await
+            {
                 Ok(_) => continue,
                 Err(ProgramTransformerError::NotImplemented) => continue,
                 Err(e) => {
@@ -423,8 +427,10 @@ fn spawn_transaction_worker(
     tokio::spawn(async move {
         let timing = Instant::now();
 
-        let r =  fetch_and_parse_transaction(client, signature).await.unwrap();
-        
+        let r = fetch_and_parse_transaction(client, signature)
+            .await
+            .unwrap();
+
         statsd_time!("transaction.queued", timing.elapsed());
 
         r

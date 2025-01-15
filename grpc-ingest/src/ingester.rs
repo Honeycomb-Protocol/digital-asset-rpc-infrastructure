@@ -204,7 +204,7 @@ pub async fn run(config: ConfigIngester) -> anyhow::Result<()> {
                         pt_accounts.handle_account_update(account).await
                     }
                     ProgramTransformerInfo::Transaction(transaction) => {
-                        pt_transactions.handle_transaction(transaction).await
+                        pt_transactions.handle_transaction(transaction, None).await
                     }
                 };
 

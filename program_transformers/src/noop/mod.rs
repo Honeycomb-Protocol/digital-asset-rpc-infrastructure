@@ -5,12 +5,14 @@ use sea_orm::{ConnectionTrait, TransactionTrait};
 mod db;
 
 pub use db::*;
+use solana_sdk::pubkey::Pubkey;
 
 pub async fn handle_noop_instruction<'c, T>(
     parsing_result: &'c NoopInstruction,
     _bundle: &'c InstructionBundle<'c>,
     txn: &T,
     _cl_audits: bool,
+    tree: Option<Pubkey>,
 ) -> ProgramTransformerResult<()>
 where
     T: ConnectionTrait + TransactionTrait,
@@ -18,7 +20,7 @@ where
     debug!("Handling NOOP Ix");
     if let Some(app) = &parsing_result.application_data {
         debug!("Found AppData Event");
-        let _seq = save_applicationdata_event(app, txn).await?;
+        let _seq = save_applicationdata_event(app, txn, tree).await?;
     }
     Ok(())
 }

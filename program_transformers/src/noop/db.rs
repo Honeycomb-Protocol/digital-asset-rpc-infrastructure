@@ -34,17 +34,19 @@ async fn exec_query<'c, T: ConnectionTrait + TransactionTrait>(
 pub async fn save_applicationdata_event<'c, T>(
     application_data: &ApplicationDataEventV1,
     txn: &T,
+    tree: Option<Pubkey>,
 ) -> Result<u64, ProgramTransformerError>
 where
     T: ConnectionTrait + TransactionTrait,
 {
-    handle_application_data(application_data, txn).await?;
+    handle_application_data(application_data, txn, tree).await?;
     Ok(0)
 }
 
 pub async fn handle_application_data<'c, T>(
     application_data: &ApplicationDataEventV1,
     txn: &T,
+    tree: Option<Pubkey>,
 ) -> ProgramTransformerResult<()>
 where
     T: ConnectionTrait + TransactionTrait,
@@ -66,6 +68,11 @@ where
             canopy_depth,
             program_id,
         } => {
+            if tree.is_some() && tree.unwrap() != Pubkey::new_from_array(tree_id) {
+                debug!("Event does not belong to provided tree");
+                return Ok(());
+            }
+
             handle_tree(
                 txn,
                 discriminator,
@@ -82,7 +89,14 @@ where
             leaf_idx,
             seq,
             stream_type,
-        } => handle_leaf(txn, tree_id, leaf_idx, stream_type, seq, slot).await?,
+        } => {
+            if tree.is_some() && tree.unwrap() != Pubkey::new_from_array(tree_id) {
+                debug!("Event does not belong to provided tree");
+                return Ok(());
+            }
+
+            handle_leaf(txn, tree_id, leaf_idx, stream_type, seq, slot).await?
+        }
     }
     Ok(())
 }
@@ -97,9 +111,18 @@ async fn handle_tree<'c, T: ConnectionTrait + TransactionTrait>(
 ) -> ProgramTransformerResult<()> {
     info!("Found new tree {}", bs58::encode(tree_id).into_string());
     // @TODO: Fetch and store, maxDepth, maxBufferSize, canopyDepth, etc...
-    let data_schema = schema
-        .try_to_vec()
-        .map_err(|db_err| ProgramTransformerError::CompressedDataParseError(db_err.to_string()))?;
+    let data_schema = if tree_id
+        == [
+            67, 67, 16, 79, 140, 160, 77, 253, 96, 194, 116, 66, 163, 4, 241, 182, 52, 246, 58,
+            120, 214, 78, 23, 53, 137, 185, 35, 93, 100, 126, 50, 184,
+        ] {
+        // Hardcode for users schema
+        vec![5, 4, 2, 0, 0, 0, 105, 100, 2, 4, 0, 0, 0, 105, 110, 102, 111, 5, 4, 8, 0, 0, 0, 117, 115, 101, 114, 110, 97, 109, 101, 3, 4, 0, 0, 0, 110, 97, 109, 101, 3, 3, 0, 0, 0, 98, 105, 111, 3, 3, 0, 0, 0, 112, 102, 112, 3, 7, 0, 0, 0, 119, 97, 108, 108, 101, 116, 115, 5, 2, 6, 0, 0, 0, 115, 104, 97, 100, 111, 119, 6, 7, 0, 0, 0, 119, 97, 108, 108, 101, 116, 115, 4, 6, 11, 0, 0, 0, 115, 111, 99, 105, 97, 108, 95, 105, 110, 102, 111, 5, 4, 7, 0, 0, 0, 116, 119, 105, 116, 116, 101, 114, 7, 3, 7, 0, 0, 0, 100, 105, 115, 99, 111, 114, 100, 7, 3, 5, 0, 0, 0, 115, 116, 101, 97, 109, 7, 3, 5, 0, 0, 0, 99, 105, 118, 105, 99, 4, 5, 3, 18, 0, 0, 0, 103, 97, 116, 101, 107, 101, 101, 112, 101, 114, 95, 110, 101, 116, 119, 111, 114, 107, 9, 3, 12, 0, 0, 0, 76, 105, 118, 101, 110, 101, 115, 115, 80, 97, 115, 115, 0, 14, 0, 0, 0, 85, 110, 105, 113, 117, 101, 110, 101, 115, 115, 80, 97, 115, 115, 0, 18, 0, 0, 0, 73, 100, 86, 101, 114, 105, 102, 105, 99, 97, 116, 105, 111, 110, 80, 97, 115, 115, 0, 6, 0, 0, 0, 101, 120, 112, 105, 114, 121, 7, 2, 12, 0, 0, 0, 119, 97, 108, 108, 101, 116, 95, 105, 110, 100, 101, 120, 2]
+    } else {
+        schema.try_to_vec().map_err(|db_err| {
+            ProgramTransformerError::CompressedDataParseError(db_err.to_string())
+        })?
+    };
 
     debug!("Parsed tree data schema");
 
@@ -130,7 +153,11 @@ async fn handle_leaf<'c, T: ConnectionTrait + TransactionTrait>(
     seq: u64,
     slot: u64,
 ) -> ProgramTransformerResult<()> {
-    error!("Found leaf {} {}", bs58::encode(tree_id).into_string(), leaf_idx);
+    error!(
+        "Found leaf {} {}",
+        bs58::encode(tree_id).into_string(),
+        leaf_idx
+    );
     let compressed_data_id = anchor_lang::solana_program::keccak::hashv(
         &[&tree_id[..], &leaf_idx.to_le_bytes()[..]][..],
     )
