@@ -1,6 +1,9 @@
 use {
     crate::{
-        config::ConfigGrpc, prom::redis_xadd_status_inc, redis::metrics_xlen, util::create_shutdown,
+        config::ConfigGrpc,
+        prom::{grpc_retry_failed, redis_xadd_status_inc},
+        redis::metrics_xlen,
+        util::create_shutdown,
     },
     futures::{channel::mpsc, stream::StreamExt, SinkExt},
     log::{debug, error, info},
@@ -129,7 +132,10 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
         debug!("client conncted for {}", &ep);
         let mut retry_count: usize = 0;
         spawn(async move {
-            while retry_count < 10 {
+            let retry = true;
+            let mut retry_wait_ms = 1;
+            while retry_wait_ms < 262144 {
+                sleep(Duration::from_millis(retry_wait_ms));
                 match try_streaming_grpc_loop(&config, &mut tx, (i as u8, &ep)).await {
                     Ok(_) => {
                         error!("try_streaming_grpc_loop: Ended unexpectedly {}", ep);
@@ -138,8 +144,10 @@ pub async fn run(config: ConfigGrpc) -> anyhow::Result<()> {
                         error!("try_streaming_grpc_loop: Final Error, {}", err);
                     }
                 }
-                retry_count += 1;
+
+                retry_wait_ms *= 2;
             }
+            grpc_retry_failed();
             error!("try_streaming_grpc_loop: we lost {}", ep);
         });
     }

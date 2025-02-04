@@ -50,6 +50,10 @@ lazy_static::lazy_static! {
     static ref DOWNLOAD_METADATA_INSERTED_TOTAL: IntCounter = IntCounter::new(
         "download_metadata_inserted_total", "Total number of inserted tasks for download metadata"
     ).unwrap();
+
+    static ref GRPC_RETRY_FAILED: IntCounter = IntCounter::new(
+        "grpc_retry_failed", "Grpc retry failed"
+    ).unwrap();
 }
 
 pub fn run_server(address: SocketAddr) -> anyhow::Result<()> {
@@ -70,6 +74,7 @@ pub fn run_server(address: SocketAddr) -> anyhow::Result<()> {
         register!(PROGRAM_TRANSFORMER_TASKS_TOTAL);
         register!(PROGRAM_TRANSFORMER_TASK_STATUS);
         register!(DOWNLOAD_METADATA_INSERTED_TOTAL);
+        register!(GRPC_RETRY_FAILED);
 
         VERSION
             .with_label_values(&[
@@ -179,4 +184,8 @@ pub fn program_transformer_task_status_inc(kind: ProgramTransformerTaskStatusKin
 
 pub fn download_metadata_inserted_total_inc() {
     DOWNLOAD_METADATA_INSERTED_TOTAL.inc()
+}
+
+pub fn grpc_retry_failed() {
+    GRPC_RETRY_FAILED.inc()
 }
