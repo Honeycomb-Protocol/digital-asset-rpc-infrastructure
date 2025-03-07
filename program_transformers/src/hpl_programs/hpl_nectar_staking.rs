@@ -4,7 +4,7 @@ use {
         AccountInfo,
     },
     blockbuster::programs::hpl_nectar_staking::{
-        HplNectarStakingAccount, Multipliers, Staker, StakingPool,
+        HplNectarStakingAccount, Multipliers, SplStakingPool, Staker, StakingPool
     },
     sea_orm::DatabaseConnection,
 };
@@ -21,6 +21,17 @@ pub async fn handle_hpl_nectar_staking_account<'a, 'b, 'c>(
                 account_info.pubkey.to_bytes().to_vec(),
                 account_info.owner.to_bytes().to_vec(),
                 StakingPool::DISCRIMINATOR.to_vec(),
+                account,
+                account_info.slot as i64,
+            )
+            .await
+        }
+        HplNectarStakingAccount::SplStakingPool(account) => {
+            super::save_account(
+                db,
+                account_info.pubkey.to_bytes().to_vec(),
+                account_info.owner.to_bytes().to_vec(),
+                SplStakingPool::DISCRIMINATOR.to_vec(),
                 account,
                 account_info.slot as i64,
             )
@@ -50,5 +61,6 @@ pub async fn handle_hpl_nectar_staking_account<'a, 'b, 'c>(
         }
         _ => Err(ProgramTransformerError::NotImplemented),
     }?;
+
     Ok(())
 }
