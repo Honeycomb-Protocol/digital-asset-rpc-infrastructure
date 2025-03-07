@@ -20,6 +20,7 @@ pub enum HplNectarStakingAccount {
     Uninitialized,
     Unknown,
     StakingPool(accounts::StakingPool),
+    SplStakingPool(accounts::SplStakingPool),
     Multipliers(accounts::Multipliers),
     Staker(accounts::Staker),
 }
@@ -66,6 +67,10 @@ impl ProgramParser for HplNectarStakingParser {
         Ok(Box::new(match discriminator {
             accounts::StakingPool::DISCRIMINATOR => HplNectarStakingAccount::StakingPool(
                 accounts::StakingPool::deserialize(&mut &account_data[8..])
+                    .map_err(|_| BlockbusterError::DeserializationError)?,
+            ),
+            accounts::SplStakingPool::DISCRIMINATOR => HplNectarStakingAccount::SplStakingPool(
+                accounts::SplStakingPool::deserialize(&mut &account_data[8..])
                     .map_err(|_| BlockbusterError::DeserializationError)?,
             ),
             accounts::Multipliers::DISCRIMINATOR => HplNectarStakingAccount::Multipliers(
