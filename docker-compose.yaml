@@ -132,6 +132,30 @@ services:
     volumes:
       - ${DB_VOLUME}:/var/lib/postgresql/data/:rw
 
+  solana:
+      image: das-geyser-grpc
+      container_name: solana
+      volumes:
+        - ./programs:/so/:ro
+        - /mnt/storage/localnet/ledger:/config:rw
+        - ./solana-test-validator-geyser-config:/plugin-config:rw
+        - ./runs.sh:/runs.sh
+      environment:
+        RUST_LOG: error
+        PLUGIN_MESSENGER_CONFIG.messenger_type: "Redis"
+        PLUGIN_MESSENGER_CONFIG.connection_config: '{redis_connection_str="redis://redis"}'
+      # deploy:
+      #   resources:
+      #     limits:
+      #       cpus: '0.5'
+      #       memory: 2G
+      #     reservations:
+      #       cpus: '0.0001'
+      #       memory: 20M
+      ports:
+        - "9098:8899"
+        - "9099:8900"
+        - "9092:8900"
 
   ingester:
     depends_on:
@@ -141,7 +165,7 @@ services:
       - db
     restart: always
     environment:
-      RUST_LOG: debug
+      RUST_LOG: error
       CARGO_PKG_NAME: ingester
     build:
       context: .
