@@ -137,7 +137,7 @@ services:
       container_name: solana
       volumes:
         - ./programs:/so/:ro
-        - /mnt/storage/localnet/ledger:/config:rw
+        - ./ledger:/config:rw
         - ./solana-test-validator-geyser-config:/plugin-config:rw
         - ./runs.sh:/runs.sh
       environment:
