@@ -1,4 +1,4 @@
-FROM rust:1.75-bullseye AS builder
+FROM rust:1.81-bullseye AS builder
 RUN apt-get update -y && \
   apt-get install -y build-essential make git
 
@@ -25,6 +25,6 @@ ENV GIT_VERSION=111
 RUN --mount=type=cache,target=/rust/target,id=das-rust \
   cargo build --release --bins && cp `find /rust/target/release -maxdepth 1 -type f | sed 's/^\.\///' | grep -v "\." ` /rust/bins
 
-FROM rust:1.75-slim-bullseye as final
+FROM rust:1.81-slim-bullseye as final
 COPY --from=builder /rust/bins /das/
 CMD echo "Built the DAS API bins!"

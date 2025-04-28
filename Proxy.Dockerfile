@@ -1,4 +1,4 @@
-FROM rust:1.75-bullseye AS builder
+FROM rust:1.81-bullseye AS builder
 
 RUN cargo install wasm-pack@0.12.1
 
