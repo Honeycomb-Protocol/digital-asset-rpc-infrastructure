@@ -3,9 +3,16 @@ use hpl_toolkit::prelude::*;
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
 pub struct DelegateAuthority {
+    /// Bump value used for PDA.
     pub bump: u8,
+
+    /// Public key of the project associated with this delegated authority.
     pub project: Pubkey,
+
+    /// Public key of the authority getting these permissions.
     pub authority: Pubkey,
+
+    /// List of service delegations, each specifying the program and its permissions.
     pub delegations: Vec<ServiceDelegation>,
 }
 impl DelegateAuthority {
@@ -14,86 +21,132 @@ impl DelegateAuthority {
 
 #[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
 pub enum ServiceDelegation {
+    /// Hive Control delegation with a specific set of permissions.
     HiveControl {
+        /// The permissions granted to the Hive Control.
         permission: HiveControlPermission,
     },
-    AssetAssembler {
-        index: u8,
-        permission: AssetAssemblerPermission,
-    },
+
+    /// Asset Assembler program delegation with a specific set of permissions and an associated index.
     CharacterManager {
+        /// Index of the service in the service vector in the project struct.
         index: u8,
+
+        /// The permissions granted to the asset Assembler programs.
         permission: CharacterManagerPermissions,
     },
-    AssetManager {
-        index: u8,
-        permission: AssetManagerPermission,
+
+    /// Resource Manager program delegation with a specific set of permissions and an associated index.
+    ResourceManager {
+        /// The permissions granted to the Resource Manager programs.
+        permission: ResourceManagerPermission,
     },
-    CurrencyManager {
-        permission: CurrencyManagerPermission,
-    },
+
+    /// Nectar Staking program delegation with a specific set of permissions and an associated index.
     NectarStaking {
+        /// Index of the service in the service vector in the project struct.
         index: u8,
+
+        /// The permissions granted to the Nectar staking programs.
         permission: NectarStakingPermission,
     },
+
+    /// Nectar Missions program delegation with a specific set of permissions and an associated index.
     NectarMissions {
+        /// Index of the service in the service vector in the project struct.
         index: u8,
+
+        /// The permissions granted to the Nectar Missions programs.
         permission: NectarMissionsPermission,
     },
+
+    /// Buzz Guild program delegation with a specific set of permissions and an associated index.
     BuzzGuild {
+        /// Index of the service in the service vector in the project struct.
         index: u8,
+
+        /// The permissions granted to the Buzz Guild programs.
         permission: BuzzGuildPermission,
     },
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
+/// Enum representing different types of permissions for the master program delegation.
+#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq, Eq)]
 pub enum HiveControlPermission {
+    /// Permission to manage project driver.
+    ManageProjectDriver,
+
+    /// Permission to manage criterias i.e, collections and creators.
     ManageCriterias,
+
+    /// Permission to manage services.
     ManageServices,
-    ManageIndexing,
-    ManageProfiles,
+
+    /// Permission to update platform data.
+    UpdatePlatformData,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
+/// Enum representing different types of permissions for the asset assembler program delegation.
+#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq, Eq)]
 pub enum CharacterManagerPermissions {
+    /// Permission to manage assembler config.
     ManageAssemblerConfig,
+
+    /// Permission to manage character models.
     ManageCharacterModels,
+
+    /// Permissions to assign traits to a character
+    AssignCharacterTraits,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
-pub enum AssetAssemblerPermission {
-    ManageAssembler,
-    UpdateBlock,
-    UpdateBlockDefinition,
-    UpdateNFT,
-    InitialArtGeneration,
+/// Enum representing different types of permissions for the resource manager delegation.
+#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq, Eq)]
+pub enum ResourceManagerPermission {
+    /// Permission to manage resources.
+    CreateResources,
+
+    /// Permission to mint resources.
+    MintResources,
+
+    /// Permission to manage currency status.
+    BurnResources,
+
+    /// Permission to manager faucet.
+    CreateFaucet,
+
+    /// Permission to manage recipes.
+    CreateRecipe,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
-pub enum AssetManagerPermission {
-    ManageAssets,
-}
-
-#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
-pub enum CurrencyManagerPermission {
-    ManageCurrencies,
-    MintCurrencies,
-    ManageCurrencyStatus,
-}
-
-#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
+/// Enum representing different types of permissions for the Nectar staking delegation.
+#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq, Eq)]
 pub enum NectarStakingPermission {
+    /// Permission to manage the staking pool.
     ManageStakingPool,
+
+    /// Permission to withdraw staking pool rewards.
     WithdrawStakingPoolRewards,
+
+    /// Permission to manage the SPL staking pool.
+    ManageSplStakingPool,
+
+    /// Permission to withdraw SPL staking pool rewards.
+    WithdrawSplStakingPoolRewards,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
+/// Enum representing different types of permissions for the Nectar missions delegation.
+#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq, Eq)]
 pub enum NectarMissionsPermission {
+    /// Permission to manage the mission pool.
     ManageMissionPool,
+
+    /// Permission to withdraw mission pool rewards.
     WithdrawMissionPoolRewards,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq)]
+/// Enum representing different types of permissions for the Buzz guild delegation.
+#[derive(AnchorSerialize, AnchorDeserialize, ToSchema, Clone, PartialEq, Eq)]
 pub enum BuzzGuildPermission {
+    /// Permission to manage the guild kits.
     ManageGuildKit,
 }
